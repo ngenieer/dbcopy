@@ -1,0 +1,10 @@
+dbcopy/
+├── main.sh                  # Entry point
+├── config_loader.sh         # Loads YAML config
+├── prompt_for_config.sh     # Interactive config prompt
+├── verify_connection.sh     # Connection test logic
+├── full_backup.sh           # Full DB backup support
+├── copy_tables.sh           # Table copy logic
+├── dbcopy.log               # Auto-generated log file
+└── .dbcopy_config.yaml      # Auto-generated config
+
