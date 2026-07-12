@@ -8,7 +8,7 @@ perform_full_backup() {
 
   echo "🔐 Starting full backup of source → $backup_dir"
 
-  case "$DB_ENGINE" in
+  case "$SRC_ENGINE" in
     mysql)
       file="$backup_dir/${SRC_DB}_full.sql"
       # --single-transaction: consistent snapshot without locking a live DB.
@@ -56,7 +56,7 @@ perform_full_backup() {
       fi
       ;;
     *)
-      echo "❌ Full backup not implemented for engine: $DB_ENGINE" >&2
+      echo "❌ Full backup not implemented for engine: $SRC_ENGINE" >&2
       return 1
       ;;
   esac

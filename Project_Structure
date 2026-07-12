@@ -5,7 +5,8 @@ dbcopy/
 ├── prompt_for_config.sh     # Interactive config prompt (source + target)
 ├── verify_connection.sh     # Connection test for source and target
 ├── full_backup.sh           # Full source-DB backup support
-├── copy_tables.sh           # Table copy logic + row-count verification
+├── copy_tables.sh           # Same-engine table copy + row-count verification
+├── cross_engine.sh          # Cross-engine copy (mysql <-> postgresql <-> sqlite)
 ├── tests/
 │   ├── run_tests.sh         # Entry point: docker compose up + run tests
 │   ├── inner_tests.sh       # Assertions, runs inside the runner container

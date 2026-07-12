@@ -60,6 +60,8 @@ source "$SCRIPT_DIR/verify_connection.sh"
 source "$SCRIPT_DIR/full_backup.sh"
 # shellcheck source=copy_tables.sh
 source "$SCRIPT_DIR/copy_tables.sh"
+# shellcheck source=cross_engine.sh
+source "$SCRIPT_DIR/cross_engine.sh"
 
 # 📦 Load or prompt for connection config
 if ! load_config "$CONFIG_FILE"; then

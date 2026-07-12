@@ -11,6 +11,20 @@ CREATE TABLE orders (
   CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
+-- Tricky data for cross-engine escaping tests.
+CREATE TABLE notes (
+  id INT PRIMARY KEY,
+  body TEXT
+);
+
+INSERT INTO notes (id, body) VALUES
+  (1, 'plain'),
+  (2, 'tab\tsep'),
+  (3, 'line1\nline2'),
+  (4, 'quote " comma , backslash \\ 한글'),
+  (5, NULL),
+  (6, '');
+
 INSERT INTO users (name, email) VALUES
   ('Alice', 'alice@example.com'),
   ('Bob', 'bob@example.com'),

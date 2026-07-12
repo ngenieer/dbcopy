@@ -60,37 +60,61 @@ validate_port() {
 
 # Validate everything loaded from config or prompts before it is used.
 validate_config() {
-  case "$DB_ENGINE" in
-    mysql|postgresql|oracle|sqlite) ;;
-    *)
-      echo "❌ Unsupported db_engine: '$DB_ENGINE' (expected mysql/postgresql/oracle/sqlite)" >&2
-      return 1
-      ;;
-  esac
+  local e
+  SRC_ENGINE="${SRC_ENGINE:-$DB_ENGINE}"
+  TGT_ENGINE="${TGT_ENGINE:-$DB_ENGINE}"
 
-  if [[ "$DB_ENGINE" == "sqlite" ]]; then
-    # SQLite is file-based: src_db/tgt_db are file paths, no host/user/port.
-    if [[ -z "$SRC_DB" || -z "$TGT_DB" ]]; then
-      echo "❌ SQLite requires source and target database file paths (src_db / tgt_db)." >&2
+  for e in "$SRC_ENGINE" "$TGT_ENGINE"; do
+    case "$e" in
+      mysql|postgresql|oracle|sqlite) ;;
+      *)
+        echo "❌ Unsupported engine: '$e' (expected mysql/postgresql/oracle/sqlite)" >&2
+        return 1
+        ;;
+    esac
+  done
+
+  if [[ "$SRC_ENGINE" != "$TGT_ENGINE" ]]; then
+    if [[ "$SRC_ENGINE" == "oracle" || "$TGT_ENGINE" == "oracle" ]]; then
+      echo "❌ Cross-engine copies involving Oracle are not supported." >&2
       return 1
     fi
-    if [[ "$SRC_DB" == "$TGT_DB" ]]; then
-      echo "❌ SQLite source and target must be different files." >&2
-      return 1
-    fi
-    return 0
   fi
 
-  validate_hostname "$SRC_HOST" "source host" || return 1
-  validate_hostname "$TGT_HOST" "target host" || return 1
-  validate_port "$SRC_PORT" || return 1
-  validate_port "$TGT_PORT" || return 1
-  validate_identifier "$SRC_DB" "source database name" || return 1
-  validate_identifier "$TGT_DB" "target database name" || return 1
+  # Source side
+  if [[ "$SRC_ENGINE" == "sqlite" ]]; then
+    if [[ -z "$SRC_DB" ]]; then
+      echo "❌ SQLite source requires a database file path (src_db)." >&2
+      return 1
+    fi
+  else
+    validate_hostname "$SRC_HOST" "source host" || return 1
+    validate_port "$SRC_PORT" || return 1
+    validate_identifier "$SRC_DB" "source database name" || return 1
+  fi
 
-  if [[ "$DB_ENGINE" == "postgresql" ]]; then
+  # Target side
+  if [[ "$TGT_ENGINE" == "sqlite" ]]; then
+    if [[ -z "$TGT_DB" ]]; then
+      echo "❌ SQLite target requires a database file path (tgt_db)." >&2
+      return 1
+    fi
+  else
+    validate_hostname "$TGT_HOST" "target host" || return 1
+    validate_port "$TGT_PORT" || return 1
+    validate_identifier "$TGT_DB" "target database name" || return 1
+  fi
+
+  if [[ "$SRC_ENGINE" == "sqlite" && "$TGT_ENGINE" == "sqlite" && "$SRC_DB" == "$TGT_DB" ]]; then
+    echo "❌ SQLite source and target must be different files." >&2
+    return 1
+  fi
+
+  if [[ "$TGT_ENGINE" == "postgresql" ]]; then
     validate_identifier "${TGT_SCHEMA:-public}" "target schema" || return 1
-  elif [[ "$DB_ENGINE" == "oracle" ]]; then
+  fi
+
+  if [[ "$SRC_ENGINE" == "oracle" ]]; then
     # Usernames end up inside a sqlplus script / connect string for Oracle.
     # The regex lives in a variable so $# isn't expanded inside [[ =~ ]].
     local u ora_user_re='^[A-Za-z0-9_$#]+$'

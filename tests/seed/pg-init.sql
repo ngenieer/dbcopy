@@ -10,6 +10,21 @@ CREATE TABLE orders (
   amount NUMERIC(10,2) NOT NULL
 );
 
+-- Tricky data for cross-engine escaping tests (flag exercises boolean mapping).
+CREATE TABLE notes (
+  id INT PRIMARY KEY,
+  body TEXT,
+  flag BOOLEAN
+);
+
+INSERT INTO notes (id, body, flag) VALUES
+  (1, 'plain', true),
+  (2, E'tab\tsep', false),
+  (3, E'line1\nline2', NULL),
+  (4, E'quote " comma , backslash \\\\ 한글', true),
+  (5, NULL, NULL),
+  (6, '', false);
+
 INSERT INTO users (name, email) VALUES
   ('Alice', 'alice@example.com'),
   ('Bob', 'bob@example.com'),

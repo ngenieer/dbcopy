@@ -1,11 +1,11 @@
 #!/bin/bash
 
 verify_one_connection() {
-  local label="$1" host="$2" port="$3" user="$4" pass="$5" service="${6:-}"
+  local engine="$1" label="$2" host="$3" port="$4" user="$5" pass="$6" service="${7:-}"
   local err rc=0
   err=$(mktemp) || return 1
 
-  case "$DB_ENGINE" in
+  case "$engine" in
     mysql)
       # Password via MYSQL_PWD, not -p<pass>: keeps it out of `ps` output.
       MYSQL_PWD="$pass" mysql -h"$host" -P"${port:-3306}" -u"$user" \
@@ -25,7 +25,7 @@ EOF
       grep -qE "ORA-|SP2-" "$err" && rc=1
       ;;
     *)
-      echo "❌ Unsupported engine: $DB_ENGINE" >&2
+      echo "❌ Unsupported engine: $engine" >&2
       rm -f "$err"
       return 1
       ;;
@@ -43,7 +43,7 @@ EOF
   return 0
 }
 
-_verify_sqlite() {
+_verify_sqlite_src() {
   if ! command -v sqlite3 > /dev/null; then
     echo "❌ sqlite3 CLI not found." >&2
     return 1
@@ -57,7 +57,13 @@ _verify_sqlite() {
     return 1
   fi
   echo "✅ Source ($SRC_DB) is a valid SQLite database."
+}
 
+_verify_sqlite_tgt() {
+  if ! command -v sqlite3 > /dev/null; then
+    echo "❌ sqlite3 CLI not found." >&2
+    return 1
+  fi
   if [[ -f "$TGT_DB" ]]; then
     if ! sqlite3 -readonly "$TGT_DB" "SELECT 1;" > /dev/null; then
       echo "❌ Target exists but is not a valid SQLite database: $TGT_DB" >&2
@@ -77,10 +83,15 @@ _verify_sqlite() {
 }
 
 verify_connection() {
-  if [[ "$DB_ENGINE" == "sqlite" ]]; then
-    _verify_sqlite
-    return $?
+  if [[ "$SRC_ENGINE" == "sqlite" ]]; then
+    _verify_sqlite_src || return 1
+  else
+    verify_one_connection "$SRC_ENGINE" "Source ($SRC_HOST)" "$SRC_HOST" "$SRC_PORT" "$SRC_USER" "$SRC_PASS" "$SRC_ORA_SERVICE" || return 1
   fi
-  verify_one_connection "Source ($SRC_HOST)" "$SRC_HOST" "$SRC_PORT" "$SRC_USER" "$SRC_PASS" "$SRC_ORA_SERVICE" || return 1
-  verify_one_connection "Target ($TGT_HOST)" "$TGT_HOST" "$TGT_PORT" "$TGT_USER" "$TGT_PASS" "$TGT_ORA_SERVICE" || return 1
+
+  if [[ "$TGT_ENGINE" == "sqlite" ]]; then
+    _verify_sqlite_tgt || return 1
+  else
+    verify_one_connection "$TGT_ENGINE" "Target ($TGT_HOST)" "$TGT_HOST" "$TGT_PORT" "$TGT_USER" "$TGT_PASS" "$TGT_ORA_SERVICE" || return 1
+  fi
 }

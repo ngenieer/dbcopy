@@ -175,6 +175,110 @@ else
   assert_eq "missing source table exits nonzero" "nonzero" "nonzero"
 fi
 
+_cross_user_for() { case "$1" in mysql) echo root ;; postgresql) echo postgres ;; *) echo "" ;; esac; }
+
+cross_cfg() { # file src_engine tgt_engine src_host src_db tgt_host tgt_db
+  cat > "$1" <<EOF
+src_engine: "$2"
+tgt_engine: "$3"
+src_host: "$4"
+src_port: ""
+src_user: "$(_cross_user_for "$2")"
+src_pass: "srcpass"
+src_db: "$5"
+tgt_host: "$6"
+tgt_port: ""
+tgt_user: "$(_cross_user_for "$3")"
+tgt_pass: "tgtpass"
+tgt_db: "$7"
+tgt_schema: "public"
+src_ora_service: ""
+tgt_ora_service: ""
+dump_file: ""
+EOF
+  chmod 600 "$1"
+}
+
+echo
+echo "═══ Cross-engine: MySQL → PostgreSQL ═══"
+cross_cfg x_m2p.yaml mysql postgresql mysql-src srcdb pg-tgt xm2p
+
+echo "--- dry run ---"
+"$ROOT/main.sh" --config x_m2p.yaml --tables notes --yes --dry-run
+assert_eq "dry-run did not create the target DB" "0" \
+  "$(pg_tgt_q postgres "SELECT COUNT(*) FROM pg_database WHERE datname='xm2p';")"
+
+echo "--- real copy ---"
+"$ROOT/main.sh" --config x_m2p.yaml --tables users,notes --yes
+assert_eq "users copied (5 rows)" "5" "$(pg_tgt_q xm2p "SELECT count(*) FROM users;")"
+assert_eq "notes copied (6 rows)" "6" "$(pg_tgt_q xm2p "SELECT count(*) FROM notes;")"
+assert_eq "NULL survives" "1" "$(pg_tgt_q xm2p "SELECT count(*) FROM notes WHERE body IS NULL;")"
+assert_eq "empty string stays empty (not NULL)" "1" "$(pg_tgt_q xm2p "SELECT count(*) FROM notes WHERE body = '';")"
+assert_eq "embedded newline survives" "1" "$(pg_tgt_q xm2p "SELECT count(*) FROM notes WHERE position(E'\n' in body) > 0;")"
+src_len=$(mysql_src_q "SELECT CHAR_LENGTH(body) FROM srcdb.notes WHERE id=4;")
+assert_eq "special chars row length matches (id=4)" "$src_len" \
+  "$(pg_tgt_q xm2p "SELECT length(body) FROM notes WHERE id=4;")"
+
+echo "--- re-run with replace (must not duplicate rows) ---"
+"$ROOT/main.sh" --config x_m2p.yaml --tables notes --yes
+assert_eq "notes still 6 rows after replace" "6" "$(pg_tgt_q xm2p "SELECT count(*) FROM notes;")"
+
+echo
+echo "═══ Cross-engine: PostgreSQL → MySQL ═══"
+cross_cfg x_p2m.yaml postgresql mysql pg-src srcdb mysql-tgt xp2m
+"$ROOT/main.sh" --config x_p2m.yaml --tables users,notes --yes
+assert_eq "users copied (5 rows)" "5" "$(mysql_tgt_q "SELECT COUNT(*) FROM xp2m.users;")"
+assert_eq "notes copied (6 rows)" "6" "$(mysql_tgt_q "SELECT COUNT(*) FROM xp2m.notes;")"
+assert_eq "NULL survives" "1" "$(mysql_tgt_q "SELECT COUNT(*) FROM xp2m.notes WHERE body IS NULL;")"
+assert_eq "empty string stays empty (not NULL)" "1" "$(mysql_tgt_q "SELECT COUNT(*) FROM xp2m.notes WHERE body = '' AND body IS NOT NULL;")"
+assert_eq "embedded newline survives" "1" "$(mysql_tgt_q "SELECT COUNT(*) FROM xp2m.notes WHERE INSTR(body, CHAR(10)) > 0;")"
+assert_eq "boolean mapped to tinyint (true count)" "2" "$(mysql_tgt_q "SELECT COUNT(*) FROM xp2m.notes WHERE flag = 1;")"
+src_len=$(PGPASSWORD=srcpass psql -hpg-src -Upostgres -d srcdb -Atc "SELECT length(body) FROM notes WHERE id=4;")
+assert_eq "special chars row length matches (id=4)" "$src_len" \
+  "$(mysql_tgt_q "SELECT CHAR_LENGTH(body) FROM xp2m.notes WHERE id=4;")"
+
+echo
+echo "═══ Cross-engine: MySQL → SQLite ═══"
+cross_cfg x_m2s.yaml mysql sqlite mysql-src srcdb "" x_m2s.db
+"$ROOT/main.sh" --config x_m2s.yaml --tables notes --yes
+assert_eq "notes copied (6 rows)" "6" "$(sqlite3 -readonly x_m2s.db 'SELECT COUNT(*) FROM notes;')"
+assert_eq "NULL survives" "1" "$(sqlite3 -readonly x_m2s.db 'SELECT COUNT(*) FROM notes WHERE body IS NULL;')"
+assert_eq "empty string stays empty (not NULL)" "1" "$(sqlite3 -readonly x_m2s.db "SELECT COUNT(*) FROM notes WHERE body = '';")"
+assert_eq "embedded newline survives" "1" "$(sqlite3 -readonly x_m2s.db 'SELECT COUNT(*) FROM notes WHERE instr(body, char(10)) > 0;')"
+src_len=$(mysql_src_q "SELECT CHAR_LENGTH(body) FROM srcdb.notes WHERE id=4;")
+assert_eq "special chars row length matches (id=4)" "$src_len" \
+  "$(sqlite3 -readonly x_m2s.db 'SELECT length(body) FROM notes WHERE id=4;')"
+
+echo
+echo "═══ Cross-engine: PostgreSQL → SQLite ═══"
+cross_cfg x_p2s.yaml postgresql sqlite pg-src srcdb "" x_p2s.db
+"$ROOT/main.sh" --config x_p2s.yaml --tables notes --yes
+assert_eq "notes copied (6 rows)" "6" "$(sqlite3 -readonly x_p2s.db 'SELECT COUNT(*) FROM notes;')"
+assert_eq "NULL survives" "1" "$(sqlite3 -readonly x_p2s.db 'SELECT COUNT(*) FROM notes WHERE body IS NULL;')"
+assert_eq "boolean mapped to integer (true count)" "2" "$(sqlite3 -readonly x_p2s.db 'SELECT COUNT(*) FROM notes WHERE flag = 1;')"
+assert_eq "embedded newline survives" "1" "$(sqlite3 -readonly x_p2s.db 'SELECT COUNT(*) FROM notes WHERE instr(body, char(10)) > 0;')"
+
+echo
+echo "═══ Cross-engine: SQLite → PostgreSQL ═══"
+cross_cfg x_s2p.yaml sqlite postgresql "" src.db pg-tgt xs2p
+"$ROOT/main.sh" --config x_s2p.yaml --tables notes --yes
+assert_eq "notes copied (6 rows)" "6" "$(pg_tgt_q xs2p "SELECT count(*) FROM notes;")"
+assert_eq "NULL survives" "1" "$(pg_tgt_q xs2p "SELECT count(*) FROM notes WHERE body IS NULL;")"
+assert_eq "empty string stays empty (not NULL)" "1" "$(pg_tgt_q xs2p "SELECT count(*) FROM notes WHERE body = '';")"
+assert_eq "embedded newline survives" "1" "$(pg_tgt_q xs2p "SELECT count(*) FROM notes WHERE position(E'\n' in body) > 0;")"
+src_len=$(sqlite3 -readonly src.db 'SELECT length(body) FROM notes WHERE id=4;')
+assert_eq "special chars row length matches (id=4)" "$src_len" \
+  "$(pg_tgt_q xs2p "SELECT length(body) FROM notes WHERE id=4;")"
+
+echo
+echo "═══ Cross-engine: SQLite → MySQL ═══"
+cross_cfg x_s2m.yaml sqlite mysql "" src.db mysql-tgt xs2m
+"$ROOT/main.sh" --config x_s2m.yaml --tables notes --yes
+assert_eq "notes copied (6 rows)" "6" "$(mysql_tgt_q "SELECT COUNT(*) FROM xs2m.notes;")"
+assert_eq "NULL survives" "1" "$(mysql_tgt_q "SELECT COUNT(*) FROM xs2m.notes WHERE body IS NULL;")"
+assert_eq "empty string stays empty (not NULL)" "1" "$(mysql_tgt_q "SELECT COUNT(*) FROM xs2m.notes WHERE body = '' AND body IS NOT NULL;")"
+assert_eq "embedded newline survives" "1" "$(mysql_tgt_q "SELECT COUNT(*) FROM xs2m.notes WHERE INSTR(body, CHAR(10)) > 0;")"
+
 echo
 echo "═══ Legacy config format (single-server copy) ═══"
 cat > legacy.yaml <<'EOF'

@@ -13,6 +13,11 @@ load_config() {
   confirm "Use this configuration?" || return 1
 
   DB_ENGINE=$(config_get "$config_file" db_engine)
+  SRC_ENGINE=$(config_get "$config_file" src_engine)
+  TGT_ENGINE=$(config_get "$config_file" tgt_engine)
+  SRC_ENGINE="${SRC_ENGINE:-$DB_ENGINE}"
+  TGT_ENGINE="${TGT_ENGINE:-$DB_ENGINE}"
+  DB_ENGINE="${DB_ENGINE:-$SRC_ENGINE}"
 
   if grep -q '^db_host:' "$config_file"; then
     # Legacy single-server format: one connection serves as source and target.

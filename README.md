@@ -8,6 +8,7 @@ A modular Bash utility that safely copies specific tables between **MySQL**, **M
 
 ## 🚀 Features
 
+- 🔀 **Cross-engine copy** between MySQL/MariaDB ↔ PostgreSQL ↔ SQLite (any direction): the target table is created automatically from the source schema via a type map, and data streams through a NULL-safe interchange format
 - 🌐 Separate source and target connections — copy between different servers (MySQL/PostgreSQL)
 - 🤖 Non-interactive mode (`--tables ... --yes`) for cron/CI
 - 🔢 Row-count verification after each copy (mismatches are reported and logged)
@@ -91,6 +92,26 @@ src_db: "/data/prod-snapshot.db"
 tgt_db: "./local-copy.db"
 ```
 
+### Cross-engine copy
+
+Set `src_engine` and `tgt_engine` to different engines (`db_engine` is then unnecessary). Any direction between `mysql`, `postgresql`, and `sqlite` works; Oracle is excluded:
+
+```yaml
+src_engine: "mysql"
+tgt_engine: "postgresql"
+src_host: "db1.internal"
+src_user: "reader"
+src_pass: "..."
+src_db: "prod"
+tgt_host: "warehouse.internal"
+tgt_user: "writer"
+tgt_pass: "..."
+tgt_db: "staging"
+tgt_schema: "public"
+```
+
+What carries over: columns (via a generic type map), `NOT NULL`, and the primary key. What does **not**: secondary indexes, foreign keys, auto-increment/identity, defaults, and triggers. Binary types (`blob`/`bytea`/`varbinary`) are rejected loudly. Column names must match `[A-Za-z0-9_]+`.
+
 ---
 
 ## 🧪 Tests
@@ -109,4 +130,7 @@ tests/run_tests.sh   # requires docker compose
 - MySQL copies go through `mysqldump | mysql`, so indexes, foreign keys, and triggers carry over. Replacing a table that other tables reference re-attaches their FKs to the new copy.
 - PostgreSQL copies assume the source table lives in the `public` schema; a non-`public` target schema is handled by restoring into `public` and then `ALTER TABLE ... SET SCHEMA`. Replacing a table referenced by another table's FK will fail loudly (drop the constraint first).
 - SQLite table selection uses `sqlite3 .dump`, whose argument is a `LIKE` pattern — a `_` in a table name acts as a single-character wildcard, so a rare similarly-named table could be included.
+- Cross-engine copies **into MySQL** use `LOAD DATA LOCAL INFILE`, which requires `local_infile=ON` on the target server.
+- Cross-engine NULLs travel as a sentinel string (`__dbcopy_null_7f3a9c__`); a field containing that exact text would arrive as NULL.
+- Cross-engine copies read the source table from the `public` schema when the source is PostgreSQL.
 - For stronger credential protection use `~/.my.cnf`, `~/.pgpass`, or an Oracle wallet; TLS settings are also left to your client config.

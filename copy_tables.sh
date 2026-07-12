@@ -36,6 +36,11 @@ copy_tables() {
     validate_identifier "$table" "table name" || return 1
   done
 
+  if [[ "$SRC_ENGINE" != "$TGT_ENGINE" ]]; then
+    _cross_copy_tables "$dry_run" "$log_file" "${tables[@]}"
+    return $?
+  fi
+
   if [[ "$DB_ENGINE" == "mysql" ]]; then
     local mysql_src=(mysql -h"$SRC_HOST" -P"${SRC_PORT:-3306}" -u"$SRC_USER")
     local mysql_tgt=(mysql -h"$TGT_HOST" -P"${TGT_PORT:-3306}" -u"$TGT_USER")
