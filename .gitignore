@@ -1,0 +1,7 @@
+# Contains a plain-text database password — never commit.
+.dbcopy_config.yaml
+
+# Generated at runtime
+*.log
+backup_*/
+*.dmp

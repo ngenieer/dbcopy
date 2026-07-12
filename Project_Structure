@@ -1,10 +1,11 @@
 dbcopy/
 ├── main.sh                  # Entry point
+├── utils.sh                 # Config parsing + input validation helpers
 ├── config_loader.sh         # Loads YAML config
 ├── prompt_for_config.sh     # Interactive config prompt
 ├── verify_connection.sh     # Connection test logic
 ├── full_backup.sh           # Full DB backup support
 ├── copy_tables.sh           # Table copy logic
-├── dbcopy.log               # Auto-generated log file
-└── .dbcopy_config.yaml      # Auto-generated config
-
+├── .gitignore               # Keeps config/logs/backups out of git
+├── dbcopy.log               # Auto-generated log file (not tracked)
+└── .dbcopy_config.yaml      # Auto-generated config, mode 600 (not tracked)
