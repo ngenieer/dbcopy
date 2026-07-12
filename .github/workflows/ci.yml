@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bash syntax check
+        run: |
+          for f in *.sh tests/*.sh; do
+            bash -n "$f"
+          done
+
+      # -x follows the `# shellcheck source=` directives in main.sh,
+      # -a reports findings in the sourced files too.
+      - name: ShellCheck
+        run: shellcheck -S warning -ax main.sh tests/run_tests.sh tests/inner_tests.sh
+
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run docker compose integration tests
+        run: tests/run_tests.sh

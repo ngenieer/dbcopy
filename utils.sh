@@ -79,9 +79,10 @@ validate_config() {
     validate_identifier "${TGT_SCHEMA:-public}" "target schema" || return 1
   elif [[ "$DB_ENGINE" == "oracle" ]]; then
     # Usernames end up inside a sqlplus script / connect string for Oracle.
-    local u
+    # The regex lives in a variable so $# isn't expanded inside [[ =~ ]].
+    local u ora_user_re='^[A-Za-z0-9_$#]+$'
     for u in "$SRC_USER" "$TGT_USER"; do
-      if [[ ! "$u" =~ ^[A-Za-z0-9_$#]+$ ]]; then
+      if [[ ! "$u" =~ $ora_user_re ]]; then
         echo "❌ Invalid Oracle username: '$u'" >&2
         return 1
       fi

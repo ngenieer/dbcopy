@@ -48,11 +48,17 @@ if [[ "$DRY_RUN" == true ]]; then
 fi
 
 # 🧩 Load modular components
+# shellcheck source=utils.sh
 source "$SCRIPT_DIR/utils.sh"
+# shellcheck source=config_loader.sh
 source "$SCRIPT_DIR/config_loader.sh"
+# shellcheck source=prompt_for_config.sh
 source "$SCRIPT_DIR/prompt_for_config.sh"
+# shellcheck source=verify_connection.sh
 source "$SCRIPT_DIR/verify_connection.sh"
+# shellcheck source=full_backup.sh
 source "$SCRIPT_DIR/full_backup.sh"
+# shellcheck source=copy_tables.sh
 source "$SCRIPT_DIR/copy_tables.sh"
 
 # 📦 Load or prompt for connection config
