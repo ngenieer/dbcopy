@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/ngenieer/dbcopy/actions/workflows/ci.yml/badge.svg)](https://github.com/ngenieer/dbcopy/actions/workflows/ci.yml)
 
-A modular Bash utility that safely copies specific tables between **MySQL**, **MariaDB**, **PostgreSQL**, and **Oracle** databases — interactively or fully non-interactively, on one server or **across servers**, with a **full backup option** and row-count verification after every copy.
+A modular Bash utility that safely copies specific tables between **MySQL**, **MariaDB**, **PostgreSQL**, **Oracle**, and **SQLite** databases — interactively or fully non-interactively, on one server or **across servers**, with a **full backup option** and row-count verification after every copy.
 
 ---
 
@@ -29,6 +29,7 @@ A modular Bash utility that safely copies specific tables between **MySQL**, **M
 | `mysql`, `mysqldump` | Required for MySQL/MariaDB (either vendor's client works; use `db_engine: "mysql"` for both) |
 | `psql`, `pg_dump` | Required for PostgreSQL |
 | `sqlplus`, `expdp`, `impdp` | Oracle backup/migration |
+| `sqlite3` | Required for SQLite |
 
 No other dependencies — YAML config parsing is handled by the scripts themselves.
 
@@ -82,11 +83,19 @@ dump_file: ""               # Oracle only
 
 The legacy single-server format (`db_host:` / `source_db:` / `target_db:`) is still read and treated as one server acting as both source and target.
 
+For SQLite, `src_db` / `tgt_db` are **file paths** (the target file is created if missing) and the host/port/user/pass fields are ignored:
+
+```yaml
+db_engine: "sqlite"
+src_db: "/data/prod-snapshot.db"
+tgt_db: "./local-copy.db"
+```
+
 ---
 
 ## 🧪 Tests
 
-Integration tests spin up source/target MySQL 8, MariaDB 11, and PostgreSQL 16 servers with docker compose and run dbcopy against them (dry-run, cross-server copy, replace-without-duplicates, non-`public` target schema, legacy config):
+Integration tests spin up source/target MySQL 8, MariaDB 11, and PostgreSQL 16 servers with docker compose and run dbcopy against them — plus a file-based SQLite pass (dry-run, cross-server copy, replace-without-duplicates, non-`public` target schema, legacy config):
 
 ```bash
 tests/run_tests.sh   # requires docker compose
@@ -99,4 +108,5 @@ tests/run_tests.sh   # requires docker compose
 - **Oracle** copies are same-server only (Data Pump via `DATA_PUMP_DIR`); use `NETWORK_LINK` for cross-server transfers. The Oracle path is not covered by the docker tests.
 - MySQL copies go through `mysqldump | mysql`, so indexes, foreign keys, and triggers carry over. Replacing a table that other tables reference re-attaches their FKs to the new copy.
 - PostgreSQL copies assume the source table lives in the `public` schema; a non-`public` target schema is handled by restoring into `public` and then `ALTER TABLE ... SET SCHEMA`. Replacing a table referenced by another table's FK will fail loudly (drop the constraint first).
+- SQLite table selection uses `sqlite3 .dump`, whose argument is a `LIKE` pattern — a `_` in a table name acts as a single-character wildcard, so a rare similarly-named table could be included.
 - For stronger credential protection use `~/.my.cnf`, `~/.pgpass`, or an Oracle wallet; TLS settings are also left to your client config.

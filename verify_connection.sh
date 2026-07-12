@@ -43,7 +43,44 @@ EOF
   return 0
 }
 
+_verify_sqlite() {
+  if ! command -v sqlite3 > /dev/null; then
+    echo "❌ sqlite3 CLI not found." >&2
+    return 1
+  fi
+  if [[ ! -f "$SRC_DB" ]]; then
+    echo "❌ Source database file not found: $SRC_DB" >&2
+    return 1
+  fi
+  if ! sqlite3 -readonly "$SRC_DB" "SELECT 1;" > /dev/null; then
+    echo "❌ Source is not a valid SQLite database: $SRC_DB" >&2
+    return 1
+  fi
+  echo "✅ Source ($SRC_DB) is a valid SQLite database."
+
+  if [[ -f "$TGT_DB" ]]; then
+    if ! sqlite3 -readonly "$TGT_DB" "SELECT 1;" > /dev/null; then
+      echo "❌ Target exists but is not a valid SQLite database: $TGT_DB" >&2
+      return 1
+    fi
+    echo "✅ Target ($TGT_DB) is a valid SQLite database."
+  else
+    local tgt_dir
+    tgt_dir=$(dirname "$TGT_DB")
+    if [[ ! -d "$tgt_dir" || ! -w "$tgt_dir" ]]; then
+      echo "❌ Target directory is missing or not writable: $tgt_dir" >&2
+      return 1
+    fi
+    echo "✅ Target ($TGT_DB) will be created."
+  fi
+  return 0
+}
+
 verify_connection() {
+  if [[ "$DB_ENGINE" == "sqlite" ]]; then
+    _verify_sqlite
+    return $?
+  fi
   verify_one_connection "Source ($SRC_HOST)" "$SRC_HOST" "$SRC_PORT" "$SRC_USER" "$SRC_PASS" "$SRC_ORA_SERVICE" || return 1
   verify_one_connection "Target ($TGT_HOST)" "$TGT_HOST" "$TGT_PORT" "$TGT_USER" "$TGT_PASS" "$TGT_ORA_SERVICE" || return 1
 }

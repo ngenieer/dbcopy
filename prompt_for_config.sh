@@ -9,13 +9,23 @@ prompt_and_save_config() {
   DUMP_FILE=""
 
   while true; do
-    read -p "Enter database engine (mysql/postgresql/oracle): " DB_ENGINE
+    read -p "Enter database engine (mysql/postgresql/oracle/sqlite): " DB_ENGINE
     DB_ENGINE=$(echo "$DB_ENGINE" | tr '[:upper:]' '[:lower:]')
     case "$DB_ENGINE" in
-      mysql|postgresql|oracle) break ;;
+      mysql|postgresql|oracle|sqlite) break ;;
       *) echo "❌ Unsupported engine: '$DB_ENGINE'" ;;
     esac
   done
+
+  if [[ "$DB_ENGINE" == "sqlite" ]]; then
+    # File-based: no connection details, just the two database files.
+    SRC_HOST=""; SRC_PORT=""; SRC_USER=""; SRC_PASS=""
+    TGT_HOST=""; TGT_PORT=""; TGT_USER=""; TGT_PASS=""
+    read -p "Source database file: " SRC_DB
+    read -p "Target database file (created if missing): " TGT_DB
+    _write_config_file "$config_file"
+    return 0
+  fi
 
   echo "-- Source connection --"
   read -p "Source host (default: localhost): " SRC_HOST
@@ -55,8 +65,13 @@ prompt_and_save_config() {
     read -p "Oracle dump file name (without .dmp): " DUMP_FILE
   fi
 
-  # umask 077 (in a subshell) + chmod: the file is never world-readable,
-  # even for an instant — it holds plain-text passwords.
+  _write_config_file "$config_file"
+}
+
+# umask 077 (in a subshell) + chmod: the file is never world-readable,
+# even for an instant — it holds plain-text passwords.
+_write_config_file() {
+  local config_file="$1"
   (
     umask 077
     cat > "$config_file" <<EOF

@@ -131,6 +131,51 @@ assert_eq "users still 5 rows after replace" "5" \
   "$(pg_tgt_q tgtdb "SELECT count(*) FROM analytics.users;")"
 
 echo
+echo "═══ SQLite: file-to-file copy ═══"
+sqlite3 src.db < "$ROOT/tests/seed/sqlite-init.sql"
+cat > sqlite.yaml <<'EOF'
+db_engine: "sqlite"
+src_host: ""
+src_port: ""
+src_user: ""
+src_pass: ""
+src_db: "src.db"
+tgt_host: ""
+tgt_port: ""
+tgt_user: ""
+tgt_pass: ""
+tgt_db: "tgt.db"
+tgt_schema: "public"
+src_ora_service: ""
+tgt_ora_service: ""
+dump_file: ""
+EOF
+chmod 600 sqlite.yaml
+
+echo "--- dry run ---"
+"$ROOT/main.sh" --config sqlite.yaml --tables users,orders --yes --dry-run
+assert_eq "dry-run did not create the target file" "absent" \
+  "$([[ -f tgt.db ]] && echo present || echo absent)"
+
+echo "--- real copy ---"
+"$ROOT/main.sh" --config sqlite.yaml --tables users,orders --yes
+assert_eq "users copied (5 rows)" "5" "$(sqlite3 -readonly tgt.db 'SELECT COUNT(*) FROM users;')"
+assert_eq "orders copied (7 rows)" "7" "$(sqlite3 -readonly tgt.db 'SELECT COUNT(*) FROM orders;')"
+assert_eq "index carried over" "1" \
+  "$(sqlite3 -readonly tgt.db "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_orders_user';")"
+
+echo "--- re-run with replace (must not duplicate rows) ---"
+"$ROOT/main.sh" --config sqlite.yaml --tables users --yes
+assert_eq "users still 5 rows after replace" "5" "$(sqlite3 -readonly tgt.db 'SELECT COUNT(*) FROM users;')"
+
+echo "--- missing source table fails loudly ---"
+if "$ROOT/main.sh" --config sqlite.yaml --tables no_such_table --yes > /dev/null 2>&1; then
+  assert_eq "missing source table exits nonzero" "nonzero" "zero"
+else
+  assert_eq "missing source table exits nonzero" "nonzero" "nonzero"
+fi
+
+echo
 echo "═══ Legacy config format (single-server copy) ═══"
 cat > legacy.yaml <<'EOF'
 db_engine: "mysql"

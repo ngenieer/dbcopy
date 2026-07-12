@@ -160,6 +160,68 @@ copy_tables() {
       fi
     done
 
+  elif [[ "$DB_ENGINE" == "sqlite" ]]; then
+    for table in "${tables[@]}"; do
+      echo "➡️  SQLite: $table"
+
+      local src_exists
+      if ! src_exists=$(sqlite3 -readonly "$SRC_DB" "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='$table';"); then
+        echo "❌ Could not read the source database." >&2
+        return 1
+      fi
+      if [[ "$src_exists" == "0" ]]; then
+        echo "❌ Table $table not found in source $SRC_DB" >&2
+        echo "$(date '+%F %T') | FAILED $table (not in source)" >> "$log_file"
+        failures=$((failures + 1))
+        continue
+      fi
+
+      # Opening a missing file with sqlite3 would create it, so only check
+      # for the table when the target file already exists (dry-run safety).
+      exists="0"
+      if [[ -f "$TGT_DB" ]]; then
+        if ! exists=$(sqlite3 -readonly "$TGT_DB" "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='$table';"); then
+          echo "❌ Could not check whether $table exists on the target." >&2
+          return 1
+        fi
+      fi
+      if [[ "$exists" != "0" ]]; then
+        if ! confirm "Table $table exists on the target. Replace?"; then
+          echo "⏭️  Skipping $table."
+          continue
+        fi
+        if [[ "$dry_run" == false ]]; then
+          sqlite3 -bail "$TGT_DB" "DROP TABLE \"$table\";"
+        fi
+      fi
+
+      if [[ "$dry_run" == true ]]; then
+        echo "Would copy $table ($SRC_DB → $TGT_DB)"
+        continue
+      fi
+
+      # .dump TABLE emits schema + data. The target file is created on
+      # first write if it does not exist yet.
+      local copy_ok=true
+      sqlite3 -readonly -bail "$SRC_DB" ".dump $table" | sqlite3 -bail "$TGT_DB" || copy_ok=false
+      if [[ "$copy_ok" == true ]]; then
+        # .dump TABLE matches sqlite_master *names*, so separately named
+        # indexes/triggers on the table are not included — copy their DDL too.
+        sqlite3 -readonly "$SRC_DB" "SELECT sql || ';' FROM sqlite_master WHERE tbl_name='$table' AND type IN ('index','trigger') AND sql IS NOT NULL;" \
+          | sqlite3 -bail "$TGT_DB" || copy_ok=false
+      fi
+
+      if [[ "$copy_ok" == true ]]; then
+        src_count=$(sqlite3 -readonly "$SRC_DB" "SELECT COUNT(*) FROM \"$table\";")
+        tgt_count=$(sqlite3 -readonly "$TGT_DB" "SELECT COUNT(*) FROM \"$table\";")
+        report_copy_result "$table" "$src_count" "$tgt_count" "$log_file" || failures=$((failures + 1))
+      else
+        echo "❌ Failed to copy $table" >&2
+        echo "$(date '+%F %T') | FAILED $table" >> "$log_file"
+        failures=$((failures + 1))
+      fi
+    done
+
   elif [[ "$DB_ENGINE" == "oracle" ]]; then
     if [[ "$SRC_HOST" != "$TGT_HOST" || "${SRC_PORT:-1521}" != "${TGT_PORT:-1521}" \
           || "$SRC_ORA_SERVICE" != "$TGT_ORA_SERVICE" || "$SRC_USER" != "$TGT_USER" ]]; then

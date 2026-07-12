@@ -32,6 +32,17 @@ perform_full_backup() {
         return 1
       fi
       ;;
+    sqlite)
+      file="$backup_dir/$(basename "$SRC_DB")"
+      # .backup uses SQLite's online backup API — safe on a live database.
+      if sqlite3 "$SRC_DB" ".backup \"$file\""; then
+        echo "✅ SQLite backup saved to $file"
+      else
+        rm -f "$file"
+        echo "❌ SQLite backup failed." >&2
+        return 1
+      fi
+      ;;
     oracle)
       file="${SRC_DB}_full.dmp"
       # Password is fed on stdin so it never appears in the process list.

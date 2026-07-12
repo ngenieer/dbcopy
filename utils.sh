@@ -61,12 +61,25 @@ validate_port() {
 # Validate everything loaded from config or prompts before it is used.
 validate_config() {
   case "$DB_ENGINE" in
-    mysql|postgresql|oracle) ;;
+    mysql|postgresql|oracle|sqlite) ;;
     *)
-      echo "❌ Unsupported db_engine: '$DB_ENGINE' (expected mysql/postgresql/oracle)" >&2
+      echo "❌ Unsupported db_engine: '$DB_ENGINE' (expected mysql/postgresql/oracle/sqlite)" >&2
       return 1
       ;;
   esac
+
+  if [[ "$DB_ENGINE" == "sqlite" ]]; then
+    # SQLite is file-based: src_db/tgt_db are file paths, no host/user/port.
+    if [[ -z "$SRC_DB" || -z "$TGT_DB" ]]; then
+      echo "❌ SQLite requires source and target database file paths (src_db / tgt_db)." >&2
+      return 1
+    fi
+    if [[ "$SRC_DB" == "$TGT_DB" ]]; then
+      echo "❌ SQLite source and target must be different files." >&2
+      return 1
+    fi
+    return 0
+  fi
 
   validate_hostname "$SRC_HOST" "source host" || return 1
   validate_hostname "$TGT_HOST" "target host" || return 1

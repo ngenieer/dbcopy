@@ -1,7 +1,7 @@
 FROM postgres:16
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends default-mysql-client \
+ && apt-get install -y --no-install-recommends default-mysql-client sqlite3 \
  && rm -rf /var/lib/apt/lists/*
 
 # The test servers use auto-generated self-signed certs the MariaDB 11.8
