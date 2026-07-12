@@ -9,6 +9,10 @@ DRY_RUN=false
 ASSUME_YES=false
 DO_FULL_BACKUP=false
 TABLES_ARG=""
+WHERE_CLAUSE=""
+ALL_TABLES=false
+SCHEMA_ONLY=false
+DATA_ONLY=false
 
 usage() {
   cat <<'EOF'
@@ -18,6 +22,12 @@ Options:
   --dry-run           Preview changes without applying them
   --config FILE       Config file to use (default: .dbcopy_config.yaml)
   --tables LIST       Comma/space-separated table names (skips the prompt)
+  --all-tables        Copy every table in the source database
+  --where EXPR        Only copy rows matching this SQL condition (applied
+                      to every selected table; not supported for Oracle)
+  --schema-only       Create table structures without copying rows
+  --data-only         Copy rows into existing target tables (truncates
+                      them first; the schema must already be in place)
   -y, --yes           Non-interactive: use the saved config and replace
                       existing target tables without asking
   --full-backup       Perform a full backup of the source DB and exit
@@ -35,6 +45,11 @@ while [[ $# -gt 0 ]]; do
     --full-backup) DO_FULL_BACKUP=true ;;
     --tables) TABLES_ARG="${2:?--tables requires a value}"; shift ;;
     --tables=*) TABLES_ARG="${1#*=}" ;;
+    --where) WHERE_CLAUSE="${2:?--where requires a value}"; shift ;;
+    --where=*) WHERE_CLAUSE="${1#*=}" ;;
+    --all-tables) ALL_TABLES=true ;;
+    --schema-only) SCHEMA_ONLY=true ;;
+    --data-only) DATA_ONLY=true ;;
     --config) CONFIG_FILE="${2:?--config requires a value}"; shift ;;
     --config=*) CONFIG_FILE="${1#*=}" ;;
     -h|--help) usage; exit 0 ;;
@@ -42,6 +57,19 @@ while [[ $# -gt 0 ]]; do
   esac
   shift
 done
+
+if [[ "$SCHEMA_ONLY" == true && "$DATA_ONLY" == true ]]; then
+  echo "❌ --schema-only and --data-only are mutually exclusive." >&2
+  exit 1
+fi
+if [[ "$SCHEMA_ONLY" == true && -n "$WHERE_CLAUSE" ]]; then
+  echo "❌ --where has no effect with --schema-only." >&2
+  exit 1
+fi
+if [[ "$ALL_TABLES" == true && -n "$TABLES_ARG" ]]; then
+  echo "❌ Use either --tables or --all-tables, not both." >&2
+  exit 1
+fi
 
 if [[ "$DRY_RUN" == true ]]; then
   echo "🧪 DRY RUN mode: No changes will be made."

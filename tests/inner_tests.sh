@@ -280,6 +280,51 @@ assert_eq "empty string stays empty (not NULL)" "1" "$(mysql_tgt_q "SELECT COUNT
 assert_eq "embedded newline survives" "1" "$(mysql_tgt_q "SELECT COUNT(*) FROM xs2m.notes WHERE INSTR(body, CHAR(10)) > 0;")"
 
 echo
+echo "═══ Partial copy options ═══"
+echo "--- --where (same-engine mysql) ---"
+"$ROOT/main.sh" --config mysql.yaml --tables users --where "id <= 2" --yes
+assert_eq "--where copies only matching rows" "2" "$(mysql_tgt_q "SELECT COUNT(*) FROM tgtdb.users;")"
+
+echo "--- --where (same-engine sqlite, ATTACH path) ---"
+"$ROOT/main.sh" --config sqlite.yaml --tables users --where "id <= 3" --yes
+assert_eq "--where via ATTACH copies only matching rows" "3" "$(sqlite3 -readonly tgt.db 'SELECT COUNT(*) FROM users;')"
+
+echo "--- --where (cross-engine mysql→pg) ---"
+"$ROOT/main.sh" --config x_m2p.yaml --tables notes --where "id <= 3" --yes
+assert_eq "--where works cross-engine" "3" "$(pg_tgt_q xm2p "SELECT count(*) FROM notes;")"
+
+echo "--- --schema-only then --data-only (same-engine pg) ---"
+"$ROOT/main.sh" --config pg.yaml --tables orders --schema-only --yes
+assert_eq "--schema-only leaves table empty" "0" "$(pg_tgt_q tgtdb "SELECT count(*) FROM analytics.orders;")"
+"$ROOT/main.sh" --config pg.yaml --tables orders --data-only --yes
+assert_eq "--data-only fills the existing table" "7" "$(pg_tgt_q tgtdb "SELECT count(*) FROM analytics.orders;")"
+
+echo "--- --schema-only then --data-only (cross-engine mysql→pg) ---"
+"$ROOT/main.sh" --config x_m2p.yaml --tables orders --schema-only --yes
+assert_eq "cross --schema-only creates empty table" "0" "$(pg_tgt_q xm2p "SELECT count(*) FROM orders;")"
+"$ROOT/main.sh" --config x_m2p.yaml --tables orders --data-only --yes
+assert_eq "cross --data-only fills the existing table" "7" "$(pg_tgt_q xm2p "SELECT count(*) FROM orders;")"
+
+echo "--- --data-only without target table fails ---"
+if "$ROOT/main.sh" --config mysql.yaml --tables no_table_here --data-only --yes > /dev/null 2>&1; then
+  assert_eq "--data-only on missing table exits nonzero" "nonzero" "zero"
+else
+  assert_eq "--data-only on missing table exits nonzero" "nonzero" "nonzero"
+fi
+
+echo "--- --all-tables (same-engine sqlite) ---"
+cat > sq_all.yaml <<'EOF'
+db_engine: "sqlite"
+src_db: "src.db"
+tgt_db: "all.db"
+EOF
+chmod 600 sq_all.yaml
+"$ROOT/main.sh" --config sq_all.yaml --all-tables --yes
+assert_eq "--all-tables copies every table" "3" \
+  "$(sqlite3 -readonly all.db "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")"
+assert_eq "--all-tables data present" "5" "$(sqlite3 -readonly all.db 'SELECT COUNT(*) FROM users;')"
+
+echo
 echo "═══ Legacy config format (single-server copy) ═══"
 cat > legacy.yaml <<'EOF'
 db_engine: "mysql"

@@ -294,17 +294,21 @@ _cross_sqlite_fix_sentinels() { # $1=table
 
 _cross_copy_data() { # $1=table
   local table="$1" sel tmp vars="" sets="" i
+  local where_sql=""
+  if [[ -n "${WHERE_CLAUSE:-}" ]]; then
+    where_sql=" WHERE $WHERE_CLAUSE"
+  fi
   case "$SRC_ENGINE:$TGT_ENGINE" in
     mysql:postgresql)
       sel=$(_cross_mysql_select_list)
       # mysql -B escapes \t \n \\ exactly like pg's COPY text format expects.
-      _cross_mysql_src -B -N -e "SELECT $sel FROM $(_cross_src_ref "$table");" \
+      _cross_mysql_src -B -N -e "SELECT $sel FROM $(_cross_src_ref "$table")$where_sql;" \
         | sed "s/$DBCOPY_NULL_SENTINEL/\\\\N/g" \
         | _cross_psql_tgt -q -d "$TGT_DB" -c "\\copy $(_cross_tgt_ref "$table") FROM STDIN"
       ;;
     mysql:sqlite)
       sel=$(_cross_mysql_csv_expr)
-      _cross_mysql_src --raw -B -N -e "SELECT $sel FROM $(_cross_src_ref "$table");" \
+      _cross_mysql_src --raw -B -N -e "SELECT $sel FROM $(_cross_src_ref "$table")$where_sql;" \
         | sqlite3 -bail "$TGT_DB" ".import --csv /dev/stdin $table" || return 1
       _cross_sqlite_fix_sentinels "$table"
       ;;
@@ -313,7 +317,7 @@ _cross_copy_data() { # $1=table
       # LOAD DATA's default text format.
       sel=$(_cross_pg_select_list)
       tmp=$(mktemp) || return 1
-      if ! _cross_psql_src -d "$SRC_DB" -c "COPY (SELECT $sel FROM $(_cross_src_ref "$table")) TO STDOUT" > "$tmp"; then
+      if ! _cross_psql_src -d "$SRC_DB" -c "COPY (SELECT $sel FROM $(_cross_src_ref "$table")$where_sql) TO STDOUT" > "$tmp"; then
         rm -f "$tmp"; return 1
       fi
       if ! _cross_mysql_tgt --local-infile=1 -e "LOAD DATA LOCAL INFILE '$tmp' INTO TABLE $(_cross_tgt_ref "$table");"; then
@@ -324,13 +328,13 @@ _cross_copy_data() { # $1=table
       ;;
     postgresql:sqlite)
       sel=$(_cross_pg_select_list)
-      _cross_psql_src -d "$SRC_DB" -c "COPY (SELECT $sel FROM $(_cross_src_ref "$table")) TO STDOUT WITH (FORMAT csv, NULL '$DBCOPY_NULL_SENTINEL')" \
+      _cross_psql_src -d "$SRC_DB" -c "COPY (SELECT $sel FROM $(_cross_src_ref "$table")$where_sql) TO STDOUT WITH (FORMAT csv, NULL '$DBCOPY_NULL_SENTINEL')" \
         | sqlite3 -bail "$TGT_DB" ".import --csv /dev/stdin $table" || return 1
       _cross_sqlite_fix_sentinels "$table"
       ;;
     sqlite:postgresql)
       sel=$(_cross_sqlite_select_list)
-      sqlite3 -readonly -csv "$SRC_DB" "SELECT $sel FROM $(_cross_src_ref "$table");" \
+      sqlite3 -readonly -csv "$SRC_DB" "SELECT $sel FROM $(_cross_src_ref "$table")$where_sql;" \
         | _cross_psql_tgt -q -d "$TGT_DB" -c "\\copy $(_cross_tgt_ref "$table") FROM STDIN WITH (FORMAT csv, NULL '$DBCOPY_NULL_SENTINEL')"
       ;;
     sqlite:mysql)
@@ -340,7 +344,7 @@ _cross_copy_data() { # $1=table
         sets+="${sets:+, }\`${CROSS_NAMES[i]}\`=NULLIF(@v$i, '$DBCOPY_NULL_SENTINEL')"
       done
       tmp=$(mktemp) || return 1
-      if ! sqlite3 -readonly -csv "$SRC_DB" "SELECT $sel FROM $(_cross_src_ref "$table");" > "$tmp"; then
+      if ! sqlite3 -readonly -csv "$SRC_DB" "SELECT $sel FROM $(_cross_src_ref "$table")$where_sql;" > "$tmp"; then
         rm -f "$tmp"; return 1
       fi
       if ! _cross_mysql_tgt --local-infile=1 -e "LOAD DATA LOCAL INFILE '$tmp' INTO TABLE $(_cross_tgt_ref "$table") FIELDS TERMINATED BY ',' OPTIONALLY ENCLOSED BY '\"' LINES TERMINATED BY '\n' ($vars) SET $sets;"; then
@@ -357,10 +361,14 @@ _cross_copy_data() { # $1=table
 }
 
 _cross_count_src() { # $1=table
+  local where_sql=""
+  if [[ -n "${WHERE_CLAUSE:-}" ]]; then
+    where_sql=" WHERE $WHERE_CLAUSE"
+  fi
   case "$SRC_ENGINE" in
-    mysql) _cross_mysql_src -B -N -e "SELECT COUNT(*) FROM $(_cross_src_ref "$1");" ;;
-    postgresql) _cross_psql_src -d "$SRC_DB" -Atc "SELECT count(*) FROM $(_cross_src_ref "$1");" ;;
-    sqlite) sqlite3 -readonly "$SRC_DB" "SELECT COUNT(*) FROM \"$1\";" ;;
+    mysql) _cross_mysql_src -B -N -e "SELECT COUNT(*) FROM $(_cross_src_ref "$1")$where_sql;" ;;
+    postgresql) _cross_psql_src -d "$SRC_DB" -Atc "SELECT count(*) FROM $(_cross_src_ref "$1")$where_sql;" ;;
+    sqlite) sqlite3 -readonly "$SRC_DB" "SELECT COUNT(*) FROM \"$1\"$where_sql;" ;;
   esac
 }
 
@@ -434,6 +442,14 @@ _cross_drop_target() { # $1=table
   esac
 }
 
+_cross_truncate_target() { # $1=table
+  case "$TGT_ENGINE" in
+    mysql) _cross_mysql_tgt -e "TRUNCATE TABLE $(_cross_tgt_ref "$1");" ;;
+    postgresql) _cross_psql_tgt -q -d "$TGT_DB" -c "TRUNCATE $(_cross_tgt_ref "$1");" ;;
+    sqlite) sqlite3 -bail "$TGT_DB" "DELETE FROM \"$1\";" ;;
+  esac
+}
+
 _cross_copy_tables() { # $1=dry_run $2=log_file $3..=tables
   local dry_run="$1" log_file="$2"
   shift 2
@@ -455,7 +471,25 @@ _cross_copy_tables() { # $1=dry_run $2=log_file $3..=tables
       echo "❌ Could not check whether $table exists on the target." >&2
       return 1
     fi
-    if [[ "$exists" != "0" ]]; then
+    if [[ "${DATA_ONLY:-false}" == true ]]; then
+      if [[ "$exists" == "0" ]]; then
+        echo "❌ $table does not exist on the target (--data-only needs the schema in place)." >&2
+        echo "$(date '+%F %T') | FAILED $table (data-only, no target table)" >> "$log_file"
+        failures=$((failures + 1))
+        continue
+      fi
+      if ! confirm "Data-only: truncate $table on the target before loading?"; then
+        echo "⏭️  Skipping $table."
+        continue
+      fi
+      if [[ "$dry_run" == false ]]; then
+        if ! _cross_truncate_target "$table"; then
+          echo "❌ Failed to truncate $table on the target." >&2
+          failures=$((failures + 1))
+          continue
+        fi
+      fi
+    elif [[ "$exists" != "0" ]]; then
       if ! confirm "Table $table exists on the target. Replace?"; then
         echo "⏭️  Skipping $table."
         continue
@@ -475,10 +509,17 @@ _cross_copy_tables() { # $1=dry_run $2=log_file $3..=tables
       continue
     fi
 
-    if ! _cross_create_table "$table"; then
-      echo "❌ Failed to create $table on the target." >&2
-      echo "$(date '+%F %T') | FAILED $table (create)" >> "$log_file"
-      failures=$((failures + 1))
+    if [[ "${DATA_ONLY:-false}" != true ]]; then
+      if ! _cross_create_table "$table"; then
+        echo "❌ Failed to create $table on the target." >&2
+        echo "$(date '+%F %T') | FAILED $table (create)" >> "$log_file"
+        failures=$((failures + 1))
+        continue
+      fi
+    fi
+    if [[ "${SCHEMA_ONLY:-false}" == true ]]; then
+      echo "✅ $table: schema created"
+      echo "$(date '+%F %T') | Schema $table" >> "$log_file"
       continue
     fi
     if ! _cross_copy_data "$table"; then

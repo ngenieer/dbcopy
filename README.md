@@ -57,6 +57,10 @@ No other dependencies — YAML config parsing is handled by the scripts themselv
 | `--dry-run` | Preview changes without applying them |
 | `--config FILE` | Config file to use (default: `.dbcopy_config.yaml`) |
 | `--tables LIST` | Comma/space-separated table names (skips the prompt) |
+| `--all-tables` | Copy every table in the source database |
+| `--where EXPR` | Only copy rows matching a SQL condition, e.g. `--where "created_at > '2026-06-01'"` (applied to every selected table; not for Oracle) |
+| `--schema-only` | Create table structures without copying rows |
+| `--data-only` | Copy rows into existing target tables (truncates them first) |
 | `-y`, `--yes` | Use the saved config and replace existing target tables without asking |
 | `--full-backup` | Perform a full backup of the source DB and exit |
 
