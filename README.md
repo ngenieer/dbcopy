@@ -61,6 +61,7 @@ No other dependencies — YAML config parsing is handled by the scripts themselv
 | `--where EXPR` | Only copy rows matching a SQL condition, e.g. `--where "created_at > '2026-06-01'"` (applied to every selected table; not for Oracle) |
 | `--schema-only` | Create table structures without copying rows |
 | `--data-only` | Copy rows into existing target tables (truncates them first) |
+| `--parallel N` | Copy up to N tables concurrently (requires `--yes`; SQLite targets run sequentially) |
 | `-y`, `--yes` | Use the saved config and replace existing target tables without asking |
 | `--full-backup` | Perform a full backup of the source DB and exit |
 

@@ -450,89 +450,89 @@ _cross_truncate_target() { # $1=table
   esac
 }
 
-_cross_copy_tables() { # $1=dry_run $2=log_file $3..=tables
-  local dry_run="$1" log_file="$2"
-  shift 2
-  local tables=("$@") table failures=0 exists src_count tgt_count
+# Per-table cross-engine copy; dry_run/log_file come from the caller via
+# dynamic scoping. Returns 0 on success or skip, 1 on failure.
+_cross_copy_one() {
+  local table="$1" exists src_count tgt_count
+  echo "➡️  $SRC_ENGINE→$TGT_ENGINE: $table"
+
+  if ! _cross_load_columns "$table"; then
+    echo "$(date '+%F %T') | FAILED $table (cross-engine schema)" >> "$log_file"
+    return 1
+  fi
+
+  if ! exists=$(_cross_target_exists "$table"); then
+    echo "❌ Could not check whether $table exists on the target." >&2
+    return 1
+  fi
+  if [[ "${DATA_ONLY:-false}" == true ]]; then
+    if [[ "$exists" == "0" ]]; then
+      echo "❌ $table does not exist on the target (--data-only needs the schema in place)." >&2
+      echo "$(date '+%F %T') | FAILED $table (data-only, no target table)" >> "$log_file"
+      return 1
+    fi
+    if ! confirm "Data-only: truncate $table on the target before loading?"; then
+      echo "⏭️  Skipping $table."
+      return 0
+    fi
+    if [[ "$dry_run" == false ]]; then
+      if ! _cross_truncate_target "$table"; then
+        echo "❌ Failed to truncate $table on the target." >&2
+        return 1
+      fi
+    fi
+  elif [[ "$exists" != "0" ]]; then
+    if ! confirm "Table $table exists on the target. Replace?"; then
+      echo "⏭️  Skipping $table."
+      return 0
+    fi
+    if [[ "$dry_run" == false ]]; then
+      if ! _cross_drop_target "$table"; then
+        echo "❌ Failed to drop $table on the target." >&2
+        echo "$(date '+%F %T') | FAILED $table (drop)" >> "$log_file"
+        return 1
+      fi
+    fi
+  fi
+
+  if [[ "$dry_run" == true ]]; then
+    echo "Would create and copy $table (${#CROSS_NAMES[@]} columns, $SRC_ENGINE → $TGT_ENGINE)"
+    return 0
+  fi
+
+  if [[ "${DATA_ONLY:-false}" != true ]]; then
+    if ! _cross_create_table "$table"; then
+      echo "❌ Failed to create $table on the target." >&2
+      echo "$(date '+%F %T') | FAILED $table (create)" >> "$log_file"
+      return 1
+    fi
+  fi
+  if [[ "${SCHEMA_ONLY:-false}" == true ]]; then
+    echo "✅ $table: schema created"
+    echo "$(date '+%F %T') | Schema $table" >> "$log_file"
+    return 0
+  fi
+  if ! _cross_copy_data "$table"; then
+    echo "❌ Failed to copy $table" >&2
+    echo "$(date '+%F %T') | FAILED $table" >> "$log_file"
+    return 1
+  fi
+
+  src_count=$(_cross_count_src "$table") || src_count=""
+  tgt_count=$(_cross_count_tgt "$table") || tgt_count=""
+  report_copy_result "$table" "$src_count" "$tgt_count" "$log_file" || return 1
+  return 0
+}
+
+_cross_copy_tables() { # $1=dry_run $2=log_file $3=jobs $4..=tables
+  local dry_run="$1" log_file="$2" jobs="$3"
+  shift 3
+  local tables=("$@") failures=0
 
   echo "🔀 Cross-engine copy: $SRC_ENGINE → $TGT_ENGINE"
   _cross_ensure_target_db "$dry_run" || return 1
 
-  for table in "${tables[@]}"; do
-    echo "➡️  $SRC_ENGINE→$TGT_ENGINE: $table"
-
-    if ! _cross_load_columns "$table"; then
-      echo "$(date '+%F %T') | FAILED $table (cross-engine schema)" >> "$log_file"
-      failures=$((failures + 1))
-      continue
-    fi
-
-    if ! exists=$(_cross_target_exists "$table"); then
-      echo "❌ Could not check whether $table exists on the target." >&2
-      return 1
-    fi
-    if [[ "${DATA_ONLY:-false}" == true ]]; then
-      if [[ "$exists" == "0" ]]; then
-        echo "❌ $table does not exist on the target (--data-only needs the schema in place)." >&2
-        echo "$(date '+%F %T') | FAILED $table (data-only, no target table)" >> "$log_file"
-        failures=$((failures + 1))
-        continue
-      fi
-      if ! confirm "Data-only: truncate $table on the target before loading?"; then
-        echo "⏭️  Skipping $table."
-        continue
-      fi
-      if [[ "$dry_run" == false ]]; then
-        if ! _cross_truncate_target "$table"; then
-          echo "❌ Failed to truncate $table on the target." >&2
-          failures=$((failures + 1))
-          continue
-        fi
-      fi
-    elif [[ "$exists" != "0" ]]; then
-      if ! confirm "Table $table exists on the target. Replace?"; then
-        echo "⏭️  Skipping $table."
-        continue
-      fi
-      if [[ "$dry_run" == false ]]; then
-        if ! _cross_drop_target "$table"; then
-          echo "❌ Failed to drop $table on the target." >&2
-          echo "$(date '+%F %T') | FAILED $table (drop)" >> "$log_file"
-          failures=$((failures + 1))
-          continue
-        fi
-      fi
-    fi
-
-    if [[ "$dry_run" == true ]]; then
-      echo "Would create and copy $table (${#CROSS_NAMES[@]} columns, $SRC_ENGINE → $TGT_ENGINE)"
-      continue
-    fi
-
-    if [[ "${DATA_ONLY:-false}" != true ]]; then
-      if ! _cross_create_table "$table"; then
-        echo "❌ Failed to create $table on the target." >&2
-        echo "$(date '+%F %T') | FAILED $table (create)" >> "$log_file"
-        failures=$((failures + 1))
-        continue
-      fi
-    fi
-    if [[ "${SCHEMA_ONLY:-false}" == true ]]; then
-      echo "✅ $table: schema created"
-      echo "$(date '+%F %T') | Schema $table" >> "$log_file"
-      continue
-    fi
-    if ! _cross_copy_data "$table"; then
-      echo "❌ Failed to copy $table" >&2
-      echo "$(date '+%F %T') | FAILED $table" >> "$log_file"
-      failures=$((failures + 1))
-      continue
-    fi
-
-    src_count=$(_cross_count_src "$table") || src_count=""
-    tgt_count=$(_cross_count_tgt "$table") || tgt_count=""
-    report_copy_result "$table" "$src_count" "$tgt_count" "$log_file" || failures=$((failures + 1))
-  done
+  _run_tables _cross_copy_one "$jobs"
 
   if [[ $failures -gt 0 ]]; then
     echo "❌ Table copy finished with $failures failure(s) — see $log_file." >&2

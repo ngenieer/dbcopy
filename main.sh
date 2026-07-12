@@ -13,6 +13,7 @@ WHERE_CLAUSE=""
 ALL_TABLES=false
 SCHEMA_ONLY=false
 DATA_ONLY=false
+PARALLEL_JOBS=1
 
 usage() {
   cat <<'EOF'
@@ -28,6 +29,8 @@ Options:
   --schema-only       Create table structures without copying rows
   --data-only         Copy rows into existing target tables (truncates
                       them first; the schema must already be in place)
+  --parallel N        Copy up to N tables concurrently (requires --yes;
+                      SQLite targets always run sequentially)
   -y, --yes           Non-interactive: use the saved config and replace
                       existing target tables without asking
   --full-backup       Perform a full backup of the source DB and exit
@@ -50,6 +53,8 @@ while [[ $# -gt 0 ]]; do
     --all-tables) ALL_TABLES=true ;;
     --schema-only) SCHEMA_ONLY=true ;;
     --data-only) DATA_ONLY=true ;;
+    --parallel) PARALLEL_JOBS="${2:?--parallel requires a value}"; shift ;;
+    --parallel=*) PARALLEL_JOBS="${1#*=}" ;;
     --config) CONFIG_FILE="${2:?--config requires a value}"; shift ;;
     --config=*) CONFIG_FILE="${1#*=}" ;;
     -h|--help) usage; exit 0 ;;
@@ -68,6 +73,14 @@ if [[ "$SCHEMA_ONLY" == true && -n "$WHERE_CLAUSE" ]]; then
 fi
 if [[ "$ALL_TABLES" == true && -n "$TABLES_ARG" ]]; then
   echo "❌ Use either --tables or --all-tables, not both." >&2
+  exit 1
+fi
+if [[ ! "$PARALLEL_JOBS" =~ ^[0-9]+$ || "$PARALLEL_JOBS" -lt 1 ]]; then
+  echo "❌ --parallel expects a positive integer." >&2
+  exit 1
+fi
+if [[ "$PARALLEL_JOBS" -gt 1 && "$ASSUME_YES" != true ]]; then
+  echo "❌ --parallel requires --yes (prompts are impossible in parallel jobs)." >&2
   exit 1
 fi
 

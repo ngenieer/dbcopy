@@ -325,6 +325,28 @@ assert_eq "--all-tables copies every table" "3" \
 assert_eq "--all-tables data present" "5" "$(sqlite3 -readonly all.db 'SELECT COUNT(*) FROM users;')"
 
 echo
+echo "═══ Parallel copy ═══"
+echo "--- --parallel without --yes is rejected ---"
+if "$ROOT/main.sh" --config mysql.yaml --tables users --parallel 3 > /dev/null 2>&1; then
+  assert_eq "--parallel without --yes exits nonzero" "nonzero" "zero"
+else
+  assert_eq "--parallel without --yes exits nonzero" "nonzero" "nonzero"
+fi
+
+echo "--- same-engine mysql, 3 tables in parallel ---"
+sed 's/^tgt_db: .*/tgt_db: "ptest"/' mysql.yaml > m_par.yaml && chmod 600 m_par.yaml
+"$ROOT/main.sh" --config m_par.yaml --tables users,orders,notes --parallel 3 --yes
+assert_eq "parallel: users copied" "5" "$(mysql_tgt_q "SELECT COUNT(*) FROM ptest.users;")"
+assert_eq "parallel: orders copied" "7" "$(mysql_tgt_q "SELECT COUNT(*) FROM ptest.orders;")"
+assert_eq "parallel: notes copied" "6" "$(mysql_tgt_q "SELECT COUNT(*) FROM ptest.notes;")"
+
+echo "--- cross-engine mysql→pg in parallel ---"
+sed 's/^tgt_db: .*/tgt_db: "xpar"/' x_m2p.yaml > x_par.yaml && chmod 600 x_par.yaml
+"$ROOT/main.sh" --config x_par.yaml --tables users,notes --parallel 2 --yes
+assert_eq "parallel cross: users copied" "5" "$(pg_tgt_q xpar "SELECT count(*) FROM users;")"
+assert_eq "parallel cross: notes copied" "6" "$(pg_tgt_q xpar "SELECT count(*) FROM notes;")"
+
+echo
 echo "═══ Oracle: same-server Data Pump copy ═══"
 ora_q() { # run one query as SYSTEM against FREEPDB1, print trimmed result
   sqlplus -s /nolog <<EOF | tr -d '[:space:]'

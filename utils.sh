@@ -32,6 +32,42 @@ report_copy_result() {
   return 1
 }
 
+# Run "$1 <table>" for every table in the ambient `tables` array — either
+# sequentially or in parallel batches of $2. Parallel jobs buffer their
+# output and print it as each batch completes, so lines don't interleave.
+# Increments the ambient `failures` counter.
+_run_tables() {
+  local fn="$1" jobs="${2:-1}" table
+  if (( jobs <= 1 )); then
+    for table in "${tables[@]}"; do
+      "$fn" "$table" || failures=$((failures + 1))
+    done
+    return 0
+  fi
+
+  echo "⚡ Copying with up to $jobs parallel jobs."
+  local i=0 j pids=() outs=() out
+  while (( i < ${#tables[@]} )); do
+    pids=()
+    outs=()
+    for table in "${tables[@]:i:jobs}"; do
+      out=$(mktemp)
+      "$fn" "$table" > "$out" 2>&1 &
+      pids+=("$!")
+      outs+=("$out")
+    done
+    for j in "${!pids[@]}"; do
+      if ! wait "${pids[j]}"; then
+        failures=$((failures + 1))
+      fi
+      cat "${outs[j]}"
+      rm -f "${outs[j]}"
+    done
+    i=$((i + jobs))
+  done
+  return 0
+}
+
 # Whitelist validation — these values are interpolated into SQL statements
 # and Oracle connect strings, so anything outside the whitelist is rejected.
 validate_identifier() {
