@@ -28,5 +28,24 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # The runner image build downloads the Oracle Instant Client (~120MB),
+      # so cache the built image keyed on the Dockerfile.
+      - name: Restore runner image cache
+        id: runner-cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/dbcopy-runner-image.tar
+          key: runner-image-${{ hashFiles('tests/runner/Dockerfile') }}
+
+      - name: Load cached runner image
+        if: steps.runner-cache.outputs.cache-hit == 'true'
+        run: |
+          docker load -i /tmp/dbcopy-runner-image.tar
+          echo "DBCOPY_SKIP_RUNNER_BUILD=1" >> "$GITHUB_ENV"
+
       - name: Run docker compose integration tests
         run: tests/run_tests.sh
+
+      - name: Save runner image to cache
+        if: steps.runner-cache.outputs.cache-hit != 'true'
+        run: docker save dbcopy-tests-runner:latest -o /tmp/dbcopy-runner-image.tar

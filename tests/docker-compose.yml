@@ -89,6 +89,7 @@ services:
   # postgres image so the pg client exactly matches the server version.
   runner:
     build: ./runner
+    image: dbcopy-tests-runner:latest
     volumes:
       - ..:/repo
     working_dir: /repo

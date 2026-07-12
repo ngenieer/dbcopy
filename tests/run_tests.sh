@@ -11,7 +11,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
-docker compose build runner
+# CI restores the runner image from cache and sets this to skip the build.
+if [[ "${DBCOPY_SKIP_RUNNER_BUILD:-}" != "1" ]]; then
+  docker compose build runner
+fi
 docker compose up -d --wait mysql-src mysql-tgt mariadb-src mariadb-tgt pg-src pg-tgt oracle
 docker compose run --rm runner
 
