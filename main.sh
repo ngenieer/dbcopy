@@ -14,6 +14,7 @@ ALL_TABLES=false
 SCHEMA_ONLY=false
 DATA_ONLY=false
 PARALLEL_JOBS=1
+CHECKSUM=false
 
 usage() {
   cat <<'EOF'
@@ -31,6 +32,8 @@ Options:
                       them first; the schema must already be in place)
   --parallel N        Copy up to N tables concurrently (requires --yes;
                       SQLite targets always run sequentially)
+  --checksum          After each copy, compare an order-independent md5 of
+                      the full table contents (same-engine copies only)
   -y, --yes           Non-interactive: use the saved config and replace
                       existing target tables without asking
   --full-backup       Perform a full backup of the source DB and exit
@@ -55,6 +58,7 @@ while [[ $# -gt 0 ]]; do
     --data-only) DATA_ONLY=true ;;
     --parallel) PARALLEL_JOBS="${2:?--parallel requires a value}"; shift ;;
     --parallel=*) PARALLEL_JOBS="${1#*=}" ;;
+    --checksum) CHECKSUM=true ;;
     --config) CONFIG_FILE="${2:?--config requires a value}"; shift ;;
     --config=*) CONFIG_FILE="${1#*=}" ;;
     -h|--help) usage; exit 0 ;;
@@ -81,6 +85,10 @@ if [[ ! "$PARALLEL_JOBS" =~ ^[0-9]+$ || "$PARALLEL_JOBS" -lt 1 ]]; then
 fi
 if [[ "$PARALLEL_JOBS" -gt 1 && "$ASSUME_YES" != true ]]; then
   echo "❌ --parallel requires --yes (prompts are impossible in parallel jobs)." >&2
+  exit 1
+fi
+if [[ "$CHECKSUM" == true && "$SCHEMA_ONLY" == true ]]; then
+  echo "❌ --checksum has no data to verify with --schema-only." >&2
   exit 1
 fi
 
@@ -115,6 +123,15 @@ fi
 
 # 🛡 Reject values that could break out of SQL / connect strings
 validate_config || exit 1
+
+if [[ "$CHECKSUM" == true ]]; then
+  # Different engines (and sqlplus) render values differently, so an
+  # honest byte-level comparison is only possible same-engine.
+  if [[ "$SRC_ENGINE" != "$TGT_ENGINE" || "$SRC_ENGINE" == "oracle" ]]; then
+    echo "❌ --checksum is only supported for same-engine mysql/postgresql/sqlite copies." >&2
+    exit 1
+  fi
+fi
 
 # 🔌 Verify source and target connections
 verify_connection || exit 1

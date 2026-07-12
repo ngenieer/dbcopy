@@ -42,6 +42,40 @@ EOF
   esac
 }
 
+# Order-independent content check: both sides stream the full table in the
+# engine's own text format, sorted, and the md5 digests must match. Only
+# meaningful same-engine — formats differ between engines.
+_verify_checksum() { # $1=table
+  local table="$1" src_sum tgt_sum
+  case "$DB_ENGINE" in
+    mysql)
+      src_sum=$(MYSQL_PWD="$SRC_PASS" "${mysql_src[@]}" -B -N -e "SELECT * FROM \`$SRC_DB\`.\`$table\`$where_sql;" | LC_ALL=C sort | md5sum | awk '{print $1}')
+      tgt_sum=$(MYSQL_PWD="$TGT_PASS" "${mysql_tgt[@]}" -B -N -e "SELECT * FROM \`$TGT_DB\`.\`$table\`;" | LC_ALL=C sort | md5sum | awk '{print $1}')
+      ;;
+    postgresql)
+      src_sum=$(PGPASSWORD="$SRC_PASS" "${psql_src[@]}" -d "$SRC_DB" -c "COPY (SELECT * FROM public.\"$table\"$where_sql) TO STDOUT" | LC_ALL=C sort | md5sum | awk '{print $1}')
+      tgt_sum=$(PGPASSWORD="$TGT_PASS" "${psql_tgt[@]}" -d "$TGT_DB" -c "COPY (SELECT * FROM \"$TGT_SCHEMA\".\"$table\") TO STDOUT" | LC_ALL=C sort | md5sum | awk '{print $1}')
+      ;;
+    sqlite)
+      src_sum=$(sqlite3 -readonly -csv "$SRC_DB" "SELECT * FROM \"$table\"$where_sql;" | LC_ALL=C sort | md5sum | awk '{print $1}')
+      tgt_sum=$(sqlite3 -readonly -csv "$TGT_DB" "SELECT * FROM \"$table\";" | LC_ALL=C sort | md5sum | awk '{print $1}')
+      ;;
+    *)
+      echo "❌ --checksum is not supported for engine: $DB_ENGINE" >&2
+      return 1
+      ;;
+  esac
+
+  if [[ -n "$src_sum" && "$src_sum" == "$tgt_sum" ]]; then
+    echo "🔒 $table: checksum verified ($src_sum)"
+    echo "$(date '+%F %T') | Checksum OK $table $src_sum" >> "$log_file"
+    return 0
+  fi
+  echo "⚠️  $table: checksum mismatch (source=$src_sum, target=$tgt_sum)" >&2
+  echo "$(date '+%F %T') | CHECKSUM MISMATCH $table src=$src_sum tgt=$tgt_sum" >> "$log_file"
+  return 1
+}
+
 # --- Per-table copy functions -------------------------------------------
 # Called with the table name; everything else (connection arrays, dump
 # flags, dry_run, log_file, where_sql) is inherited from copy_tables via
@@ -102,6 +136,9 @@ _copy_one_mysql() {
       src_count=$(MYSQL_PWD="$SRC_PASS" "${mysql_src[@]}" -N -e "SELECT COUNT(*) FROM \`$SRC_DB\`.\`$table\`$where_sql;")
       tgt_count=$(MYSQL_PWD="$TGT_PASS" "${mysql_tgt[@]}" -N -e "SELECT COUNT(*) FROM \`$TGT_DB\`.\`$table\`;")
       report_copy_result "$table" "$src_count" "$tgt_count" "$log_file" || return 1
+      if [[ "${CHECKSUM:-false}" == true ]]; then
+        _verify_checksum "$table" || return 1
+      fi
     fi
   else
     echo "❌ Failed to copy $table" >&2
@@ -187,6 +224,9 @@ _copy_one_postgresql() {
       src_count=$(PGPASSWORD="$SRC_PASS" "${psql_src[@]}" -d "$SRC_DB" -Atc "SELECT count(*) FROM public.\"$table\"$where_sql;")
       tgt_count=$(PGPASSWORD="$TGT_PASS" "${psql_tgt[@]}" -d "$TGT_DB" -Atc "SELECT count(*) FROM \"$TGT_SCHEMA\".\"$table\";")
       report_copy_result "$table" "$src_count" "$tgt_count" "$log_file" || return 1
+      if [[ "${CHECKSUM:-false}" == true ]]; then
+        _verify_checksum "$table" || return 1
+      fi
     fi
   else
     echo "❌ Failed to copy $table" >&2
@@ -282,6 +322,9 @@ _copy_one_sqlite() {
       src_count=$(sqlite3 -readonly "$SRC_DB" "SELECT COUNT(*) FROM \"$table\"$where_sql;")
       tgt_count=$(sqlite3 -readonly "$TGT_DB" "SELECT COUNT(*) FROM \"$table\";")
       report_copy_result "$table" "$src_count" "$tgt_count" "$log_file" || return 1
+      if [[ "${CHECKSUM:-false}" == true ]]; then
+        _verify_checksum "$table" || return 1
+      fi
     fi
   else
     echo "❌ Failed to copy $table" >&2

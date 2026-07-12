@@ -325,6 +325,20 @@ assert_eq "--all-tables copies every table" "3" \
 assert_eq "--all-tables data present" "5" "$(sqlite3 -readonly all.db 'SELECT COUNT(*) FROM users;')"
 
 echo
+echo "═══ Checksum verification ═══"
+out=$("$ROOT/main.sh" --config mysql.yaml --tables orders --checksum --yes 2>&1)
+assert_eq "mysql checksum verified" "1" "$(grep -c 'checksum verified' <<< "$out")"
+out=$("$ROOT/main.sh" --config pg.yaml --tables users --checksum --yes 2>&1)
+assert_eq "pg checksum verified (across schemas)" "1" "$(grep -c 'checksum verified' <<< "$out")"
+out=$("$ROOT/main.sh" --config sqlite.yaml --tables orders --checksum --yes 2>&1)
+assert_eq "sqlite checksum verified" "1" "$(grep -c 'checksum verified' <<< "$out")"
+if "$ROOT/main.sh" --config x_m2p.yaml --tables users --checksum --yes > /dev/null 2>&1; then
+  assert_eq "cross-engine --checksum rejected" "nonzero" "zero"
+else
+  assert_eq "cross-engine --checksum rejected" "nonzero" "nonzero"
+fi
+
+echo
 echo "═══ Parallel copy ═══"
 echo "--- --parallel without --yes is rejected ---"
 if "$ROOT/main.sh" --config mysql.yaml --tables users --parallel 3 > /dev/null 2>&1; then

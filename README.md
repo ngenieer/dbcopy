@@ -62,6 +62,7 @@ No other dependencies — YAML config parsing is handled by the scripts themselv
 | `--schema-only` | Create table structures without copying rows |
 | `--data-only` | Copy rows into existing target tables (truncates them first) |
 | `--parallel N` | Copy up to N tables concurrently (requires `--yes`; SQLite targets run sequentially) |
+| `--checksum` | After each copy, compare an order-independent md5 of the full table contents (same-engine copies only; values must render identically, so keep server versions aligned) |
 | `-y`, `--yes` | Use the saved config and replace existing target tables without asking |
 | `--full-backup` | Perform a full backup of the source DB and exit |
 
