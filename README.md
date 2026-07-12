@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/ngenieer/dbcopy/actions/workflows/ci.yml/badge.svg)](https://github.com/ngenieer/dbcopy/actions/workflows/ci.yml)
 
-A modular Bash utility that safely copies specific tables between **MySQL**, **PostgreSQL**, and **Oracle** databases — interactively or fully non-interactively, on one server or **across servers**, with a **full backup option** and row-count verification after every copy.
+A modular Bash utility that safely copies specific tables between **MySQL**, **MariaDB**, **PostgreSQL**, and **Oracle** databases — interactively or fully non-interactively, on one server or **across servers**, with a **full backup option** and row-count verification after every copy.
 
 ---
 
@@ -26,7 +26,7 @@ A modular Bash utility that safely copies specific tables between **MySQL**, **P
 | Tool        | Purpose                    |
 |-------------|----------------------------|
 | `bash`      | Core scripting engine       |
-| `mysql`, `mysqldump` | Required for MySQL (MariaDB clients work too) |
+| `mysql`, `mysqldump` | Required for MySQL/MariaDB (either vendor's client works; use `db_engine: "mysql"` for both) |
 | `psql`, `pg_dump` | Required for PostgreSQL |
 | `sqlplus`, `expdp`, `impdp` | Oracle backup/migration |
 
@@ -86,7 +86,7 @@ The legacy single-server format (`db_host:` / `source_db:` / `target_db:`) is st
 
 ## 🧪 Tests
 
-Integration tests spin up source/target MySQL 8 and PostgreSQL 16 servers with docker compose and run dbcopy against them (dry-run, cross-server copy, replace-without-duplicates, non-`public` target schema, legacy config):
+Integration tests spin up source/target MySQL 8, MariaDB 11, and PostgreSQL 16 servers with docker compose and run dbcopy against them (dry-run, cross-server copy, replace-without-duplicates, non-`public` target schema, legacy config):
 
 ```bash
 tests/run_tests.sh   # requires docker compose

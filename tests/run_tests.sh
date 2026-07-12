@@ -12,7 +12,7 @@ cleanup() {
 trap cleanup EXIT
 
 docker compose build runner
-docker compose up -d --wait mysql-src mysql-tgt pg-src pg-tgt
+docker compose up -d --wait mysql-src mysql-tgt mariadb-src mariadb-tgt pg-src pg-tgt
 docker compose run --rm runner
 
 echo "🎉 All integration tests passed."

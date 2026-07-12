@@ -22,6 +22,7 @@ assert_eq() {
 
 mysql_src_q() { MYSQL_PWD=srcpass mysql -hmysql-src -uroot -N -e "$1"; }
 mysql_tgt_q() { MYSQL_PWD=tgtpass mysql -hmysql-tgt -uroot -N -e "$1"; }
+mariadb_tgt_q() { MYSQL_PWD=tgtpass mysql -hmariadb-tgt -uroot -N -e "$1"; }
 pg_tgt_q() { PGPASSWORD=tgtpass psql -hpg-tgt -Upostgres -d "$1" -Atc "$2"; }
 
 echo "═══ MySQL: cross-server, non-interactive ═══"
@@ -59,6 +60,37 @@ assert_eq "foreign key carried over" "1" \
 echo "--- re-run with replace (must not duplicate rows) ---"
 "$ROOT/main.sh" --config mysql.yaml --tables users --yes
 assert_eq "users still 5 rows after replace" "5" "$(mysql_tgt_q "SELECT COUNT(*) FROM tgtdb.users;")"
+
+echo
+echo "═══ MariaDB: cross-server via the mysql engine path ═══"
+cat > mariadb.yaml <<'EOF'
+db_engine: "mysql"
+src_host: "mariadb-src"
+src_port: "3306"
+src_user: "root"
+src_pass: "srcpass"
+src_db: "srcdb"
+tgt_host: "mariadb-tgt"
+tgt_port: "3306"
+tgt_user: "root"
+tgt_pass: "tgtpass"
+tgt_db: "tgtdb"
+tgt_schema: "public"
+src_ora_service: ""
+tgt_ora_service: ""
+dump_file: ""
+EOF
+chmod 600 mariadb.yaml
+
+"$ROOT/main.sh" --config mariadb.yaml --tables users,orders --yes
+assert_eq "users copied (5 rows)" "5" "$(mariadb_tgt_q "SELECT COUNT(*) FROM tgtdb.users;")"
+assert_eq "orders copied (7 rows)" "7" "$(mariadb_tgt_q "SELECT COUNT(*) FROM tgtdb.orders;")"
+assert_eq "foreign key carried over" "1" \
+  "$(mariadb_tgt_q "SELECT COUNT(*) FROM information_schema.referential_constraints WHERE constraint_schema='tgtdb';")"
+
+echo "--- re-run with replace (must not duplicate rows) ---"
+"$ROOT/main.sh" --config mariadb.yaml --tables users --yes
+assert_eq "users still 5 rows after replace" "5" "$(mariadb_tgt_q "SELECT COUNT(*) FROM tgtdb.users;")"
 
 echo
 echo "═══ PostgreSQL: cross-server into non-public schema ═══"

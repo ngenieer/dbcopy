@@ -26,6 +26,30 @@ services:
       timeout: 5s
       retries: 60
 
+  # MariaDB goes through the same "mysql" engine path — the matrix proves it.
+  mariadb-src:
+    image: mariadb:11
+    environment:
+      MARIADB_ROOT_PASSWORD: srcpass
+      MARIADB_DATABASE: srcdb
+    volumes:
+      - ./seed/mysql-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+
+  mariadb-tgt:
+    image: mariadb:11
+    environment:
+      MARIADB_ROOT_PASSWORD: tgtpass
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+
   pg-src:
     image: postgres:16
     environment:
@@ -59,6 +83,8 @@ services:
     depends_on:
       mysql-src: { condition: service_healthy }
       mysql-tgt: { condition: service_healthy }
+      mariadb-src: { condition: service_healthy }
+      mariadb-tgt: { condition: service_healthy }
       pg-src: { condition: service_healthy }
       pg-tgt: { condition: service_healthy }
     command: ["bash", "tests/inner_tests.sh"]
