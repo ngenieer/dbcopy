@@ -1,5 +1,7 @@
 # dbcopy
 
+[![CI](https://github.com/ngenieer/dbcopy/actions/workflows/ci.yml/badge.svg)](https://github.com/ngenieer/dbcopy/actions/workflows/ci.yml)
+
 A modular Bash utility that safely copies specific tables between **MySQL**, **PostgreSQL**, and **Oracle** databases — interactively or fully non-interactively, on one server or **across servers**, with a **full backup option** and row-count verification after every copy.
 
 ---
