@@ -487,6 +487,14 @@ _cross_drop_target() { # $1=table
   esac
 }
 
+_cross_target_max_key() { # $1=table -> MAX(INC_KEY) on the target
+  case "$TGT_ENGINE" in
+    mysql) _cross_mysql_tgt -B -N -e "SELECT MAX(\`$INC_KEY\`) FROM $(_cross_tgt_ref "$1");" ;;
+    postgresql) _cross_psql_tgt -d "$TGT_DB" -Atc "SELECT max(\"$INC_KEY\") FROM $(_cross_tgt_ref "$1");" ;;
+    sqlite) sqlite3 -readonly "$TGT_DB" "SELECT MAX(\"$INC_KEY\") FROM \"$1\";" ;;
+  esac
+}
+
 _cross_truncate_target() { # $1=table
   case "$TGT_ENGINE" in
     mysql) _cross_mysql_tgt -e "TRUNCATE TABLE $(_cross_tgt_ref "$1");" ;;
@@ -510,6 +518,39 @@ _cross_copy_one() {
     echo "❌ Could not check whether $table exists on the target." >&2
     return 1
   fi
+  if [[ "${INCREMENTAL:-false}" == true && "$exists" != "0" ]]; then
+    local tgt_max inc_pred qkey
+    if ! tgt_max=$(_cross_target_max_key "$table"); then
+      echo "❌ Could not read MAX($INC_KEY) from the target." >&2
+      return 1
+    fi
+    _inc_guard_value "$tgt_max" || return 1
+    inc_pred=""
+    if [[ -n "$tgt_max" && "$tgt_max" != "NULL" ]]; then
+      case "$SRC_ENGINE" in
+        mysql) qkey="\`$INC_KEY\`" ;;
+        *) qkey="\"$INC_KEY\"" ;;
+      esac
+      inc_pred="$qkey > '$tgt_max'"
+    fi
+    echo "🔁 Incremental: appending rows${inc_pred:+ where $inc_pred}"
+    if [[ "$dry_run" == true ]]; then
+      echo "Would append rows from $table"
+      return 0
+    fi
+    # The predicate rides in via the WHERE_CLAUSE the data path already
+    # honors (scoped to this one call).
+    if ! WHERE_CLAUSE="$inc_pred" _cross_copy_data "$table"; then
+      echo "❌ Failed to append $table" >&2
+      echo "$(date '+%F %T') | FAILED $table (incremental)" >> "$log_file"
+      return 1
+    fi
+    src_count=$(_cross_count_src "$table") || src_count=""
+    tgt_count=$(_cross_count_tgt "$table") || tgt_count=""
+    report_copy_result "$table" "$src_count" "$tgt_count" "$log_file" || return 1
+    return 0
+  fi
+
   if [[ "${DATA_ONLY:-false}" == true ]]; then
     if [[ "$exists" == "0" ]]; then
       echo "❌ $table does not exist on the target (--data-only needs the schema in place)." >&2

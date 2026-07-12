@@ -17,6 +17,8 @@ PARALLEL_JOBS=1
 CHECKSUM=false
 COMPRESS=false
 KEEP_BACKUPS=""
+INCREMENTAL=false
+INC_KEY=""
 
 usage() {
   cat <<'EOF'
@@ -36,6 +38,11 @@ Options:
                       SQLite targets always run sequentially)
   --checksum          After each copy, compare an order-independent md5 of
                       the full table contents (same-engine copies only)
+  --incremental       Append only rows newer than the target's MAX(--key)
+                      instead of replacing tables (append-only sync;
+                      missing target tables get a full copy)
+  --key COLUMN        Monotonic key column for --incremental (id, a
+                      timestamp, ...)
   -y, --yes           Non-interactive: use the saved config and replace
                       existing target tables without asking
   --full-backup       Perform a full backup of the source DB and exit
@@ -65,6 +72,9 @@ while [[ $# -gt 0 ]]; do
     --parallel=*) PARALLEL_JOBS="${1#*=}" ;;
     --checksum) CHECKSUM=true ;;
     --compress) COMPRESS=true ;;
+    --incremental) INCREMENTAL=true ;;
+    --key) INC_KEY="${2:?--key requires a value}"; shift ;;
+    --key=*) INC_KEY="${1#*=}" ;;
     --keep-backups) KEEP_BACKUPS="${2:?--keep-backups requires a value}"; shift ;;
     --keep-backups=*) KEEP_BACKUPS="${1#*=}" ;;
     --config) CONFIG_FILE="${2:?--config requires a value}"; shift ;;
@@ -101,6 +111,18 @@ if [[ "$CHECKSUM" == true && "$SCHEMA_ONLY" == true ]]; then
 fi
 if [[ -n "$KEEP_BACKUPS" && ( ! "$KEEP_BACKUPS" =~ ^[0-9]+$ || "$KEEP_BACKUPS" -lt 1 ) ]]; then
   echo "❌ --keep-backups expects a positive integer." >&2
+  exit 1
+fi
+if [[ "$INCREMENTAL" == true && -z "$INC_KEY" ]]; then
+  echo "❌ --incremental requires --key COLUMN." >&2
+  exit 1
+fi
+if [[ -n "$INC_KEY" && "$INCREMENTAL" != true ]]; then
+  echo "❌ --key only makes sense with --incremental." >&2
+  exit 1
+fi
+if [[ "$INCREMENTAL" == true && ( -n "$WHERE_CLAUSE" || "$SCHEMA_ONLY" == true || "$DATA_ONLY" == true ) ]]; then
+  echo "❌ --incremental cannot be combined with --where/--schema-only/--data-only." >&2
   exit 1
 fi
 
@@ -141,6 +163,14 @@ if [[ "$CHECKSUM" == true ]]; then
   # honest byte-level comparison is only possible same-engine.
   if [[ "$SRC_ENGINE" != "$TGT_ENGINE" || "$SRC_ENGINE" == "oracle" ]]; then
     echo "❌ --checksum is only supported for same-engine mysql/postgresql/sqlite copies." >&2
+    exit 1
+  fi
+fi
+
+if [[ "$INCREMENTAL" == true ]]; then
+  validate_identifier "$INC_KEY" "incremental key column" || exit 1
+  if [[ "$SRC_ENGINE" == "oracle" ]]; then
+    echo "❌ --incremental is not supported for Oracle." >&2
     exit 1
   fi
 fi

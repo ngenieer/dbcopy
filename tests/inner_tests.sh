@@ -407,6 +407,42 @@ assert_eq "--keep-backups prunes to 2 directories" "2" "$(ls -d backup_* | wc -l
 assert_eq "oldest backup was pruned" "absent" "$([[ -d "$backup1" ]] && echo present || echo absent)"
 
 echo
+echo "═══ Incremental sync (--incremental --key) ═══"
+sed 's/^tgt_db: .*/tgt_db: "itest"/' mysql.yaml > i_my.yaml && chmod 600 i_my.yaml
+
+echo "--- first run: target table missing → full copy ---"
+"$ROOT/main.sh" --config i_my.yaml --tables users --incremental --key id --yes
+assert_eq "initial incremental run copies everything" "5" "$(mysql_tgt_q "SELECT COUNT(*) FROM itest.users;")"
+
+echo "--- new source rows are appended, existing ones untouched ---"
+mysql_src_q "INSERT INTO srcdb.users (name, email) VALUES ('Frank','frank@example.com'), ('Grace','grace@example.com');"
+"$ROOT/main.sh" --config i_my.yaml --tables users --incremental --key id --yes
+assert_eq "incremental appends only the new rows" "7" "$(mysql_tgt_q "SELECT COUNT(*) FROM itest.users;")"
+assert_eq "no duplicate keys after append" "7" "$(mysql_tgt_q "SELECT COUNT(DISTINCT id) FROM itest.users;")"
+
+echo "--- idempotent when the source has nothing new ---"
+"$ROOT/main.sh" --config i_my.yaml --tables users --incremental --key id --yes
+assert_eq "no-op run leaves counts unchanged" "7" "$(mysql_tgt_q "SELECT COUNT(*) FROM itest.users;")"
+
+echo "--- cross-engine incremental (mysql→pg) ---"
+sed 's/^tgt_db: .*/tgt_db: "xinc"/' x_m2p.yaml > x_inc.yaml && chmod 600 x_inc.yaml
+"$ROOT/main.sh" --config x_inc.yaml --tables users --incremental --key id --yes
+assert_eq "cross incremental initial copy" "7" "$(pg_tgt_q xinc "SELECT count(*) FROM users;")"
+mysql_src_q "INSERT INTO srcdb.users (name, email) VALUES ('Heidi','heidi@example.com');"
+"$ROOT/main.sh" --config x_inc.yaml --tables users --incremental --key id --yes
+assert_eq "cross incremental append" "8" "$(pg_tgt_q xinc "SELECT count(*) FROM users;")"
+
+echo "--- conflicting flags rejected ---"
+if "$ROOT/main.sh" --config i_my.yaml --tables users --incremental --key id --where "id > 1" --yes > /dev/null 2>&1; then
+  assert_eq "--incremental + --where exits nonzero" "nonzero" "zero"
+else
+  assert_eq "--incremental + --where exits nonzero" "nonzero" "nonzero"
+fi
+
+# Restore the source for the sections below that assert 5 users.
+mysql_src_q "DELETE FROM srcdb.users WHERE id > 5;"
+
+echo
 echo "═══ Oracle: same-server Data Pump copy ═══"
 ora_q() { # run one query as SYSTEM against FREEPDB1, print trimmed result
   sqlplus -s /nolog <<EOF | tr -d '[:space:]'

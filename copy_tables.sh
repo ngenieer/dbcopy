@@ -76,6 +76,109 @@ _verify_checksum() { # $1=table
   return 1
 }
 
+# --- Incremental append (--incremental --key) ---------------------------
+# Stateless: whatever is newer than the target's MAX(key) gets appended.
+# The key value is quoted into SQL, so values containing quotes are refused.
+
+_inc_guard_value() { # $1=value
+  if [[ "$1" == *"'"* ]]; then
+    echo "❌ Refusing to build a predicate from a key value containing quotes: $1" >&2
+    return 1
+  fi
+}
+
+_incremental_mysql() {
+  local table="$1" tgt_max inc_where src_count tgt_count
+  if ! tgt_max=$(MYSQL_PWD="$TGT_PASS" "${mysql_tgt[@]}" -N -e "SELECT MAX(\`$INC_KEY\`) FROM \`$TGT_DB\`.\`$table\`;"); then
+    echo "❌ Could not read MAX($INC_KEY) from the target." >&2
+    return 1
+  fi
+  _inc_guard_value "$tgt_max" || return 1
+  if [[ -z "$tgt_max" || "$tgt_max" == "NULL" ]]; then
+    inc_where="1=1"
+  else
+    inc_where="\`$INC_KEY\` > '$tgt_max'"
+  fi
+  echo "🔁 Incremental: appending rows where $inc_where"
+  if [[ "$dry_run" == true ]]; then
+    echo "Would append rows from $table"
+    return 0
+  fi
+  if MYSQL_PWD="$SRC_PASS" mysqldump -h"$SRC_HOST" -P"${SRC_PORT:-3306}" -u"$SRC_USER" \
+       "${dump_flags[@]}" --no-create-info --where="$inc_where" "$SRC_DB" "$table" \
+       | MYSQL_PWD="$TGT_PASS" "${mysql_tgt[@]}" "$TGT_DB"; then
+    src_count=$(MYSQL_PWD="$SRC_PASS" "${mysql_src[@]}" -N -e "SELECT COUNT(*) FROM \`$SRC_DB\`.\`$table\`;")
+    tgt_count=$(MYSQL_PWD="$TGT_PASS" "${mysql_tgt[@]}" -N -e "SELECT COUNT(*) FROM \`$TGT_DB\`.\`$table\`;")
+    report_copy_result "$table" "$src_count" "$tgt_count" "$log_file" || return 1
+  else
+    echo "❌ Failed to append $table" >&2
+    echo "$(date '+%F %T') | FAILED $table (incremental)" >> "$log_file"
+    return 1
+  fi
+  return 0
+}
+
+_incremental_postgresql() {
+  local table="$1" tgt_max inc_where src_count tgt_count
+  if ! tgt_max=$(PGPASSWORD="$TGT_PASS" "${psql_tgt[@]}" -d "$TGT_DB" -Atc "SELECT max(\"$INC_KEY\") FROM \"$TGT_SCHEMA\".\"$table\";"); then
+    echo "❌ Could not read MAX($INC_KEY) from the target." >&2
+    return 1
+  fi
+  _inc_guard_value "$tgt_max" || return 1
+  if [[ -z "$tgt_max" ]]; then
+    inc_where="1=1"
+  else
+    inc_where="\"$INC_KEY\" > '$tgt_max'"
+  fi
+  echo "🔁 Incremental: appending rows where $inc_where"
+  if [[ "$dry_run" == true ]]; then
+    echo "Would append rows from $table"
+    return 0
+  fi
+  if PGPASSWORD="$SRC_PASS" "${psql_src[@]}" -d "$SRC_DB" \
+       -c "COPY (SELECT * FROM public.\"$table\" WHERE $inc_where) TO STDOUT" \
+     | PGPASSWORD="$TGT_PASS" "${psql_tgt[@]}" -q -d "$TGT_DB" \
+       -c "\\copy \"$TGT_SCHEMA\".\"$table\" FROM STDIN"; then
+    src_count=$(PGPASSWORD="$SRC_PASS" "${psql_src[@]}" -d "$SRC_DB" -Atc "SELECT count(*) FROM public.\"$table\";")
+    tgt_count=$(PGPASSWORD="$TGT_PASS" "${psql_tgt[@]}" -d "$TGT_DB" -Atc "SELECT count(*) FROM \"$TGT_SCHEMA\".\"$table\";")
+    report_copy_result "$table" "$src_count" "$tgt_count" "$log_file" || return 1
+  else
+    echo "❌ Failed to append $table" >&2
+    echo "$(date '+%F %T') | FAILED $table (incremental)" >> "$log_file"
+    return 1
+  fi
+  return 0
+}
+
+_incremental_sqlite() {
+  local table="$1" tgt_max inc_where src_count tgt_count
+  if ! tgt_max=$(sqlite3 -readonly "$TGT_DB" "SELECT MAX(\"$INC_KEY\") FROM \"$table\";"); then
+    echo "❌ Could not read MAX($INC_KEY) from the target." >&2
+    return 1
+  fi
+  _inc_guard_value "$tgt_max" || return 1
+  if [[ -z "$tgt_max" ]]; then
+    inc_where="1=1"
+  else
+    inc_where="\"$INC_KEY\" > '$tgt_max'"
+  fi
+  echo "🔁 Incremental: appending rows where $inc_where"
+  if [[ "$dry_run" == true ]]; then
+    echo "Would append rows from $table"
+    return 0
+  fi
+  if sqlite3 -bail "$TGT_DB" "ATTACH DATABASE '$SRC_DB' AS dbsrc; INSERT INTO \"$table\" SELECT * FROM dbsrc.\"$table\" WHERE $inc_where;"; then
+    src_count=$(sqlite3 -readonly "$SRC_DB" "SELECT COUNT(*) FROM \"$table\";")
+    tgt_count=$(sqlite3 -readonly "$TGT_DB" "SELECT COUNT(*) FROM \"$table\";")
+    report_copy_result "$table" "$src_count" "$tgt_count" "$log_file" || return 1
+  else
+    echo "❌ Failed to append $table" >&2
+    echo "$(date '+%F %T') | FAILED $table (incremental)" >> "$log_file"
+    return 1
+  fi
+  return 0
+}
+
 # --- Per-table copy functions -------------------------------------------
 # Called with the table name; everything else (connection arrays, dump
 # flags, dry_run, log_file, where_sql) is inherited from copy_tables via
@@ -89,6 +192,11 @@ _copy_one_mysql() {
   if ! exists=$(MYSQL_PWD="$TGT_PASS" "${mysql_tgt[@]}" -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$TGT_DB' AND table_name='$table';"); then
     echo "❌ Could not check whether $table exists on the target." >&2
     return 1
+  fi
+
+  if [[ "${INCREMENTAL:-false}" == true && "$exists" != "0" ]]; then
+    _incremental_mysql "$table"
+    return $?
   fi
 
   if [[ "${DATA_ONLY:-false}" == true ]]; then
@@ -157,6 +265,11 @@ _copy_one_postgresql() {
       echo "❌ Could not check whether $table exists on the target." >&2
       return 1
     fi
+  fi
+
+  if [[ "${INCREMENTAL:-false}" == true && -n "$exists" && "$exists" != "NULL" ]]; then
+    _incremental_postgresql "$table"
+    return $?
   fi
 
   if [[ "${DATA_ONLY:-false}" == true ]]; then
@@ -258,6 +371,11 @@ _copy_one_sqlite() {
       echo "❌ Could not check whether $table exists on the target." >&2
       return 1
     fi
+  fi
+
+  if [[ "${INCREMENTAL:-false}" == true && "$exists" != "0" ]]; then
+    _incremental_sqlite "$table"
+    return $?
   fi
 
   if [[ "${DATA_ONLY:-false}" == true ]]; then
@@ -499,8 +617,8 @@ copy_tables() {
     _run_tables _copy_one_sqlite "$jobs"
 
   elif [[ "$DB_ENGINE" == "oracle" ]]; then
-    if [[ -n "${WHERE_CLAUSE:-}" || "${SCHEMA_ONLY:-false}" == true || "${DATA_ONLY:-false}" == true ]]; then
-      echo "❌ --where/--schema-only/--data-only are not supported for Oracle." >&2
+    if [[ -n "${WHERE_CLAUSE:-}" || "${SCHEMA_ONLY:-false}" == true || "${DATA_ONLY:-false}" == true || "${INCREMENTAL:-false}" == true ]]; then
+      echo "❌ --where/--schema-only/--data-only/--incremental are not supported for Oracle." >&2
       return 1
     fi
     if [[ "$SRC_HOST" != "$TGT_HOST" || "${SRC_PORT:-1521}" != "${TGT_PORT:-1521}" \

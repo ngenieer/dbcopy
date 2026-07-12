@@ -79,6 +79,9 @@ That's it — dbcopy is plain Bash. Install the client tools for the engines you
 
 # Nightly compressed backup, keeping the last 7
 ./main.sh --full-backup --compress --keep-backups 7 --yes
+
+# Hourly append-only sync of new rows (stateless: keyed on the target's MAX(id))
+./main.sh --tables events --incremental --key id --yes
 ```
 
 ### Options
@@ -93,6 +96,7 @@ That's it — dbcopy is plain Bash. Install the client tools for the engines you
 | `--data-only` | Copy rows into existing target tables (truncates them first) |
 | `--parallel N` | Copy up to N tables concurrently (requires `--yes`; SQLite targets run sequentially) |
 | `--checksum` | Compare an order-independent md5 of the full table contents after each copy (same-engine only; keep server versions aligned so values render identically) |
+| `--incremental --key COL` | Append only rows newer than the target's `MAX(COL)` (append-only sync — updates/deletes are not detected; missing target tables get a full copy; not for Oracle) |
 | `--dry-run` | Preview changes without applying them |
 | `-y`, `--yes` | Non-interactive: use the saved config and replace existing target tables without asking |
 | `--full-backup` | Perform a full backup of the source DB and exit |

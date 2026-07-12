@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **`--incremental --key COL`**: stateless append-only sync — copies only
+  rows newer than the target's `MAX(key)`; missing target tables get a
+  full copy. Works same-engine and cross-engine (not Oracle).
 - Cross-engine copies now support **binary columns** (`blob`/`bytea`/
   `varbinary`): data is transported hex-encoded and decoded on arrival,
   NUL bytes and empty blobs included.
