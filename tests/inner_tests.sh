@@ -361,6 +361,23 @@ assert_eq "parallel cross: users copied" "5" "$(pg_tgt_q xpar "SELECT count(*) F
 assert_eq "parallel cross: notes copied" "6" "$(pg_tgt_q xpar "SELECT count(*) FROM notes;")"
 
 echo
+echo "═══ Full backup: --compress and --keep-backups ═══"
+"$ROOT/main.sh" --config mysql.yaml --full-backup --yes > /dev/null
+backup1=$(ls -d backup_*)
+assert_eq "plain backup produces a .sql dump" "1" "$(find "$backup1" -name '*_full.sql' -size +0c | wc -l)"
+
+sleep 1
+"$ROOT/main.sh" --config mysql.yaml --full-backup --compress --yes > /dev/null
+assert_eq "compressed backup produces a .sql.gz dump" "1" "$(find backup_* -name '*_full.sql.gz' -size +0c | wc -l)"
+newest_gz=$(find backup_* -name '*_full.sql.gz' | head -1)
+assert_eq "compressed dump is valid gzip" "0" "$(gzip -t "$newest_gz"; echo $?)"
+
+sleep 1
+"$ROOT/main.sh" --config sqlite.yaml --full-backup --compress --keep-backups 2 --yes > /dev/null
+assert_eq "--keep-backups prunes to 2 directories" "2" "$(ls -d backup_* | wc -l)"
+assert_eq "oldest backup was pruned" "absent" "$([[ -d "$backup1" ]] && echo present || echo absent)"
+
+echo
 echo "═══ Oracle: same-server Data Pump copy ═══"
 ora_q() { # run one query as SYSTEM against FREEPDB1, print trimmed result
   sqlplus -s /nolog <<EOF | tr -d '[:space:]'

@@ -65,6 +65,8 @@ No other dependencies — YAML config parsing is handled by the scripts themselv
 | `--checksum` | After each copy, compare an order-independent md5 of the full table contents (same-engine copies only; values must render identically, so keep server versions aligned) |
 | `-y`, `--yes` | Use the saved config and replace existing target tables without asking |
 | `--full-backup` | Perform a full backup of the source DB and exit |
+| `--compress` | gzip the backup dump (mysql/postgresql/sqlite) |
+| `--keep-backups N` | After a successful backup, keep only the N newest `backup_*` directories |
 
 ### Config file
 

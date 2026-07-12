@@ -15,6 +15,8 @@ SCHEMA_ONLY=false
 DATA_ONLY=false
 PARALLEL_JOBS=1
 CHECKSUM=false
+COMPRESS=false
+KEEP_BACKUPS=""
 
 usage() {
   cat <<'EOF'
@@ -37,6 +39,9 @@ Options:
   -y, --yes           Non-interactive: use the saved config and replace
                       existing target tables without asking
   --full-backup       Perform a full backup of the source DB and exit
+  --compress          gzip the backup dump (mysql/postgresql/sqlite)
+  --keep-backups N    After a successful backup, keep only the N newest
+                      backup_* directories and delete the rest
   -h, --help          Show this help
 
 With --tables and --yes, dbcopy runs fully non-interactively (cron/CI friendly).
@@ -59,6 +64,9 @@ while [[ $# -gt 0 ]]; do
     --parallel) PARALLEL_JOBS="${2:?--parallel requires a value}"; shift ;;
     --parallel=*) PARALLEL_JOBS="${1#*=}" ;;
     --checksum) CHECKSUM=true ;;
+    --compress) COMPRESS=true ;;
+    --keep-backups) KEEP_BACKUPS="${2:?--keep-backups requires a value}"; shift ;;
+    --keep-backups=*) KEEP_BACKUPS="${1#*=}" ;;
     --config) CONFIG_FILE="${2:?--config requires a value}"; shift ;;
     --config=*) CONFIG_FILE="${1#*=}" ;;
     -h|--help) usage; exit 0 ;;
@@ -89,6 +97,10 @@ if [[ "$PARALLEL_JOBS" -gt 1 && "$ASSUME_YES" != true ]]; then
 fi
 if [[ "$CHECKSUM" == true && "$SCHEMA_ONLY" == true ]]; then
   echo "❌ --checksum has no data to verify with --schema-only." >&2
+  exit 1
+fi
+if [[ -n "$KEEP_BACKUPS" && ( ! "$KEEP_BACKUPS" =~ ^[0-9]+$ || "$KEEP_BACKUPS" -lt 1 ) ]]; then
+  echo "❌ --keep-backups expects a positive integer." >&2
   exit 1
 fi
 
