@@ -1,10 +1,11 @@
 #!/bin/bash
 
 prompt_and_save_config() {
-  local config_file="$1"
+  local config_file="$1" same
 
   TGT_SCHEMA=""
-  ORA_SERVICE=""
+  SRC_ORA_SERVICE=""
+  TGT_ORA_SERVICE=""
   DUMP_FILE=""
 
   while true; do
@@ -16,39 +17,66 @@ prompt_and_save_config() {
     esac
   done
 
-  read -p "Enter host (default: localhost): " DB_HOST
-  DB_HOST=${DB_HOST:-localhost}
-  read -p "Enter port (optional): " DB_PORT
-  read -p "Enter DB username: " DB_USER
-  read -s -p "Enter DB password: " DB_PASS; echo
-  read -p "Enter source database: " SRC_DB
-  read -p "Enter target database: " TGT_DB
+  echo "-- Source connection --"
+  read -p "Source host (default: localhost): " SRC_HOST
+  SRC_HOST=${SRC_HOST:-localhost}
+  read -p "Source port (optional): " SRC_PORT
+  read -p "Source username: " SRC_USER
+  read -s -p "Source password: " SRC_PASS; echo
+  read -p "Source database: " SRC_DB
+  if [[ "$DB_ENGINE" == "oracle" ]]; then
+    read -p "Source Oracle service name (e.g. ORCL): " SRC_ORA_SERVICE
+  fi
+
+  echo "-- Target connection --"
+  read -p "Is the target on the same server with the same credentials? (y/n): " same
+  if [[ "$same" =~ ^[Yy]$ ]]; then
+    TGT_HOST="$SRC_HOST"
+    TGT_PORT="$SRC_PORT"
+    TGT_USER="$SRC_USER"
+    TGT_PASS="$SRC_PASS"
+    TGT_ORA_SERVICE="$SRC_ORA_SERVICE"
+  else
+    read -p "Target host (default: localhost): " TGT_HOST
+    TGT_HOST=${TGT_HOST:-localhost}
+    read -p "Target port (optional): " TGT_PORT
+    read -p "Target username: " TGT_USER
+    read -s -p "Target password: " TGT_PASS; echo
+    if [[ "$DB_ENGINE" == "oracle" ]]; then
+      read -p "Target Oracle service name (e.g. ORCL): " TGT_ORA_SERVICE
+    fi
+  fi
+  read -p "Target database: " TGT_DB
 
   if [[ "$DB_ENGINE" == "postgresql" ]]; then
-    read -p "Enter target schema (default: public): " TGT_SCHEMA
+    read -p "Target schema (default: public): " TGT_SCHEMA
     TGT_SCHEMA=${TGT_SCHEMA:-public}
   elif [[ "$DB_ENGINE" == "oracle" ]]; then
-    read -p "Enter Oracle service name (e.g. ORCL): " ORA_SERVICE
-    read -p "Enter Oracle dump file name (without .dmp): " DUMP_FILE
+    read -p "Oracle dump file name (without .dmp): " DUMP_FILE
   fi
 
   # umask 077 (in a subshell) + chmod: the file is never world-readable,
-  # even for an instant — it holds a plain-text password.
+  # even for an instant — it holds plain-text passwords.
   (
     umask 077
     cat > "$config_file" <<EOF
 db_engine: "$DB_ENGINE"
-db_host: "$DB_HOST"
-db_port: "$DB_PORT"
-db_user: "$DB_USER"
-db_pass: "$DB_PASS"
-source_db: "$SRC_DB"
-target_db: "$TGT_DB"
-target_schema: "${TGT_SCHEMA:-public}"
-ora_service: "${ORA_SERVICE:-}"
-dump_file: "${DUMP_FILE:-}"
+src_host: "$SRC_HOST"
+src_port: "$SRC_PORT"
+src_user: "$SRC_USER"
+src_pass: "$SRC_PASS"
+src_db: "$SRC_DB"
+tgt_host: "$TGT_HOST"
+tgt_port: "$TGT_PORT"
+tgt_user: "$TGT_USER"
+tgt_pass: "$TGT_PASS"
+tgt_db: "$TGT_DB"
+tgt_schema: "${TGT_SCHEMA:-public}"
+src_ora_service: "$SRC_ORA_SERVICE"
+tgt_ora_service: "$TGT_ORA_SERVICE"
+dump_file: "$DUMP_FILE"
 EOF
   )
   chmod 600 "$config_file"
-  echo "🔒 Saved config to $config_file (mode 600). Note: the password is stored in plain text — keep this file out of version control."
+  echo "🔒 Saved config to $config_file (mode 600). Note: passwords are stored in plain text — keep this file out of version control."
 }

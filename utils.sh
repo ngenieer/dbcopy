@@ -8,6 +8,30 @@ config_get() {
   sed -n "s/^${key}:[[:space:]]*\"\(.*\)\"[[:space:]]*$/\1/p" "$file" | head -n 1
 }
 
+# Ask a y/n question; --yes answers everything with yes.
+confirm() {
+  local prompt="$1" reply
+  if [[ "${ASSUME_YES:-false}" == true ]]; then
+    echo "$prompt (y/n): y  [--yes]"
+    return 0
+  fi
+  read -p "$prompt (y/n): " reply
+  [[ "$reply" =~ ^[Yy]$ ]]
+}
+
+# Compare source/target row counts after a copy and log the outcome.
+report_copy_result() {
+  local table="$1" src_count="$2" tgt_count="$3" log_file="$4"
+  if [[ -n "$src_count" && "$src_count" == "$tgt_count" ]]; then
+    echo "✅ $table: copied and verified ($tgt_count rows)"
+    echo "$(date '+%F %T') | Copied $table ($tgt_count rows, verified)" >> "$log_file"
+    return 0
+  fi
+  echo "⚠️  $table: row count mismatch (source=$src_count, target=$tgt_count)" >&2
+  echo "$(date '+%F %T') | MISMATCH $table src=$src_count tgt=$tgt_count" >> "$log_file"
+  return 1
+}
+
 # Whitelist validation — these values are interpolated into SQL statements
 # and Oracle connect strings, so anything outside the whitelist is rejected.
 validate_identifier() {
@@ -44,20 +68,26 @@ validate_config() {
       ;;
   esac
 
-  validate_hostname "$DB_HOST" "host" || return 1
-  validate_port "$DB_PORT" || return 1
+  validate_hostname "$SRC_HOST" "source host" || return 1
+  validate_hostname "$TGT_HOST" "target host" || return 1
+  validate_port "$SRC_PORT" || return 1
+  validate_port "$TGT_PORT" || return 1
   validate_identifier "$SRC_DB" "source database name" || return 1
   validate_identifier "$TGT_DB" "target database name" || return 1
 
   if [[ "$DB_ENGINE" == "postgresql" ]]; then
     validate_identifier "${TGT_SCHEMA:-public}" "target schema" || return 1
   elif [[ "$DB_ENGINE" == "oracle" ]]; then
-    # DB_USER ends up inside a sqlplus script / connect string for Oracle.
-    if [[ ! "$DB_USER" =~ ^[A-Za-z0-9_$#]+$ ]]; then
-      echo "❌ Invalid Oracle username: '$DB_USER'" >&2
-      return 1
-    fi
-    validate_hostname "$ORA_SERVICE" "Oracle service name" || return 1
+    # Usernames end up inside a sqlplus script / connect string for Oracle.
+    local u
+    for u in "$SRC_USER" "$TGT_USER"; do
+      if [[ ! "$u" =~ ^[A-Za-z0-9_$#]+$ ]]; then
+        echo "❌ Invalid Oracle username: '$u'" >&2
+        return 1
+      fi
+    done
+    validate_hostname "$SRC_ORA_SERVICE" "source Oracle service name" || return 1
+    validate_hostname "$TGT_ORA_SERVICE" "target Oracle service name" || return 1
     validate_identifier "$DUMP_FILE" "dump file name" || return 1
   fi
 

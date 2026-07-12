@@ -1,0 +1,64 @@
+name: dbcopy-tests
+
+services:
+  mysql-src:
+    image: mysql:8.0
+    command: --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_ROOT_PASSWORD: srcpass
+      MYSQL_DATABASE: srcdb
+    volumes:
+      - ./seed/mysql-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h127.0.0.1 -uroot -psrcpass"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+
+  mysql-tgt:
+    image: mysql:8.0
+    command: --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_ROOT_PASSWORD: tgtpass
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h127.0.0.1 -uroot -ptgtpass"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+
+  pg-src:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: srcpass
+      POSTGRES_DB: srcdb
+    volumes:
+      - ./seed/pg-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+
+  pg-tgt:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: tgtpass
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+
+  # Runs the dbcopy scripts against the four servers above. Based on the
+  # postgres image so the pg client exactly matches the server version.
+  runner:
+    build: ./runner
+    volumes:
+      - ..:/repo
+    working_dir: /repo
+    depends_on:
+      mysql-src: { condition: service_healthy }
+      mysql-tgt: { condition: service_healthy }
+      pg-src: { condition: service_healthy }
+      pg-tgt: { condition: service_healthy }
+    command: ["bash", "tests/inner_tests.sh"]

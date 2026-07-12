@@ -1,11 +1,17 @@
 dbcopy/
-├── main.sh                  # Entry point
-├── utils.sh                 # Config parsing + input validation helpers
-├── config_loader.sh         # Loads YAML config
-├── prompt_for_config.sh     # Interactive config prompt
-├── verify_connection.sh     # Connection test logic
-├── full_backup.sh           # Full DB backup support
-├── copy_tables.sh           # Table copy logic
+├── main.sh                  # Entry point, CLI flags (--tables/--yes/--dry-run/...)
+├── utils.sh                 # Config parsing, validation, confirm, copy verification
+├── config_loader.sh         # Loads YAML config (new src_*/tgt_* + legacy format)
+├── prompt_for_config.sh     # Interactive config prompt (source + target)
+├── verify_connection.sh     # Connection test for source and target
+├── full_backup.sh           # Full source-DB backup support
+├── copy_tables.sh           # Table copy logic + row-count verification
+├── tests/
+│   ├── run_tests.sh         # Entry point: docker compose up + run tests
+│   ├── inner_tests.sh       # Assertions, runs inside the runner container
+│   ├── docker-compose.yml   # mysql-src/tgt, pg-src/tgt, runner
+│   ├── runner/Dockerfile    # postgres:16 + mariadb client
+│   └── seed/                # Source DB fixtures
 ├── .gitignore               # Keeps config/logs/backups out of git
 ├── dbcopy.log               # Auto-generated log file (not tracked)
 └── .dbcopy_config.yaml      # Auto-generated config, mode 600 (not tracked)
