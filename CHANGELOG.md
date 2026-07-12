@@ -3,6 +3,17 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+- Cross-engine copies now support **binary columns** (`blob`/`bytea`/
+  `varbinary`): data is transported hex-encoded and decoded on arrival,
+  NUL bytes and empty blobs included.
+
+### Changed
+- CI caches the test-runner image (Oracle Instant Client download) —
+  integration runs are faster on unchanged Dockerfiles.
+
 ## [1.0.0] - 2026-07-12
 
 First stable release.

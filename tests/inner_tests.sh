@@ -280,6 +280,35 @@ assert_eq "empty string stays empty (not NULL)" "1" "$(mysql_tgt_q "SELECT COUNT
 assert_eq "embedded newline survives" "1" "$(mysql_tgt_q "SELECT COUNT(*) FROM xs2m.notes WHERE INSTR(body, CHAR(10)) > 0;")"
 
 echo
+echo "═══ Cross-engine: binary columns (hex transport) ═══"
+# Uppercased hex of the NUL-containing row must survive every direction.
+BIN_HEX="00FF10AB"
+
+"$ROOT/main.sh" --config x_m2p.yaml --tables files --yes
+assert_eq "mysql→pg binary roundtrip" "$BIN_HEX" "$(pg_tgt_q xm2p "SELECT upper(encode(data,'hex')) FROM files WHERE id=4;")"
+assert_eq "mysql→pg binary NULL survives" "1" "$(pg_tgt_q xm2p "SELECT count(*) FROM files WHERE data IS NULL;")"
+assert_eq "mysql→pg empty blob stays empty" "0" "$(pg_tgt_q xm2p "SELECT octet_length(data) FROM files WHERE id=3;")"
+
+"$ROOT/main.sh" --config x_p2m.yaml --tables files --yes
+assert_eq "pg→mysql binary roundtrip" "$BIN_HEX" "$(mysql_tgt_q "SELECT HEX(data) FROM xp2m.files WHERE id=4;")"
+assert_eq "pg→mysql binary NULL survives" "1" "$(mysql_tgt_q "SELECT COUNT(*) FROM xp2m.files WHERE data IS NULL;")"
+
+"$ROOT/main.sh" --config x_m2s.yaml --tables files --yes
+assert_eq "mysql→sqlite binary roundtrip" "$BIN_HEX" "$(sqlite3 -readonly x_m2s.db 'SELECT hex(data) FROM files WHERE id=4;')"
+assert_eq "mysql→sqlite binary NULL survives" "1" "$(sqlite3 -readonly x_m2s.db 'SELECT COUNT(*) FROM files WHERE data IS NULL;')"
+
+"$ROOT/main.sh" --config x_p2s.yaml --tables files --yes
+assert_eq "pg→sqlite binary roundtrip" "$BIN_HEX" "$(sqlite3 -readonly x_p2s.db 'SELECT hex(data) FROM files WHERE id=4;')"
+
+"$ROOT/main.sh" --config x_s2p.yaml --tables files --yes
+assert_eq "sqlite→pg binary roundtrip" "$BIN_HEX" "$(pg_tgt_q xs2p "SELECT upper(encode(data,'hex')) FROM files WHERE id=4;")"
+assert_eq "sqlite→pg binary NULL survives" "1" "$(pg_tgt_q xs2p "SELECT count(*) FROM files WHERE data IS NULL;")"
+
+"$ROOT/main.sh" --config x_s2m.yaml --tables files --yes
+assert_eq "sqlite→mysql binary roundtrip" "$BIN_HEX" "$(mysql_tgt_q "SELECT HEX(data) FROM xs2m.files WHERE id=4;")"
+assert_eq "sqlite→mysql binary NULL survives" "1" "$(mysql_tgt_q "SELECT COUNT(*) FROM xs2m.files WHERE data IS NULL;")"
+
+echo
 echo "═══ Partial copy options ═══"
 echo "--- --where (same-engine mysql) ---"
 "$ROOT/main.sh" --config mysql.yaml --tables users --where "id <= 2" --yes
@@ -320,7 +349,7 @@ tgt_db: "all.db"
 EOF
 chmod 600 sq_all.yaml
 "$ROOT/main.sh" --config sq_all.yaml --all-tables --yes
-assert_eq "--all-tables copies every table" "3" \
+assert_eq "--all-tables copies every table" "4" \
   "$(sqlite3 -readonly all.db "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")"
 assert_eq "--all-tables data present" "5" "$(sqlite3 -readonly all.db 'SELECT COUNT(*) FROM users;')"
 

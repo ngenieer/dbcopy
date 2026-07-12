@@ -25,6 +25,18 @@ INSERT INTO notes (id, body, flag) VALUES
   (5, NULL, NULL),
   (6, '', false);
 
+-- Binary data for cross-engine hex-encoding tests (incl. NUL byte + empty).
+CREATE TABLE files (
+  id INT PRIMARY KEY,
+  data BYTEA
+);
+
+INSERT INTO files (id, data) VALUES
+  (1, '\xdeadbeef'),
+  (2, NULL),
+  (3, '\x'),
+  (4, '\x00ff10ab');
+
 INSERT INTO users (name, email) VALUES
   ('Alice', 'alice@example.com'),
   ('Bob', 'bob@example.com'),

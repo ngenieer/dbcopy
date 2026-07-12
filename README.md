@@ -150,7 +150,7 @@ tgt_db: "staging"
 tgt_schema: "public"
 ```
 
-What carries over: columns (via a generic type map), `NOT NULL`, and the primary key. What does **not**: secondary indexes, foreign keys, auto-increment/identity, defaults, and triggers. Binary types (`blob`/`bytea`/`varbinary`) are rejected loudly. Column names must match `[A-Za-z0-9_]+`.
+What carries over: columns (via a generic type map), `NOT NULL`, and the primary key. Binary columns (`blob`/`bytea`/`varbinary`) are transported hex-encoded and decoded on arrival, NUL bytes included. What does **not** carry over: secondary indexes, foreign keys, auto-increment/identity, defaults, and triggers. Column names must match `[A-Za-z0-9_]+`.
 
 ---
 

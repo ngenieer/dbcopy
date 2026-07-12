@@ -89,6 +89,7 @@ _cross_generic_type() { # $1=data_type $2=len $3=prec $4=scale
     mysql)
       case "$t" in
         tinyint|smallint|year) echo SMALLINT ;;
+        blob|tinyblob|mediumblob|longblob|binary|varbinary) echo BINARY ;;
         mediumint|int) echo INT ;;
         bigint) echo BIGINT ;;
         decimal) echo "NUMERIC($3,$4)" ;;
@@ -114,6 +115,7 @@ _cross_generic_type() { # $1=data_type $2=len $3=prec $4=scale
         "character varying"|character) if [[ "$2" -gt 0 ]]; then echo "VARCHAR($2)"; else echo TEXT; fi ;;
         text) echo TEXT ;;
         uuid) echo "VARCHAR(36)" ;;
+        bytea) echo BINARY ;;
         date) echo DATE ;;
         "time without time zone") echo TIME ;;
         "timestamp without time zone"|"timestamp with time zone") echo TIMESTAMP ;;
@@ -124,7 +126,7 @@ _cross_generic_type() { # $1=data_type $2=len $3=prec $4=scale
       # SQLite declared types are free-form — use affinity-style matching.
       case "$t" in
         *int*) echo BIGINT ;;
-        *blob*) return 1 ;;
+        *blob*) echo BINARY ;;
         *bool*) echo BOOL ;;
         *real*|*floa*|*doub*) echo DOUBLE ;;
         *decimal*|*numeric*) echo NUMERIC ;;
@@ -153,6 +155,7 @@ _cross_render_type() { # $1=generic -> target column type
         TIME) echo time ;;
         TIMESTAMP) echo timestamp ;;
         JSON) echo jsonb ;;
+        BINARY) echo bytea ;;
       esac ;;
     mysql)
       case "$base" in
@@ -169,12 +172,14 @@ _cross_render_type() { # $1=generic -> target column type
         TIME) echo time ;;
         TIMESTAMP) echo datetime ;;
         JSON) echo json ;;
+        BINARY) echo longblob ;;
       esac ;;
     sqlite)
       case "$base" in
         INT|BIGINT|SMALLINT|BOOL) echo INTEGER ;;
         DOUBLE|REAL) echo REAL ;;
         NUMERIC) echo NUMERIC ;;
+        BINARY) echo BLOB ;;
         *) echo TEXT ;;
       esac ;;
   esac
@@ -243,6 +248,7 @@ _cross_pg_select_list() {
     q="\"${CROSS_NAMES[i]}\""
     case "${CROSS_TYPES[i]}:${CROSS_RAW[i]}" in
       BOOL:*) q="$q::int" ;;
+      BINARY:*) q="encode($q, 'hex')" ;;
       *:"timestamp with time zone") q="($q AT TIME ZONE 'UTC')" ;;
     esac
     out+="${out:+, }$q"
@@ -254,9 +260,16 @@ _cross_pg_select_list() {
 # as CHAR with NULLs replaced by the sentinel (mysql batch mode prints the
 # bare word NULL, which is indistinguishable from real 'NULL' text).
 _cross_mysql_select_list() {
-  local i out=""
+  local i out="" f
   for i in "${!CROSS_NAMES[@]}"; do
-    out+="${out:+, }IFNULL(CAST(\`${CROSS_NAMES[i]}\` AS CHAR), '$DBCOPY_NULL_SENTINEL')"
+    if [[ "${CROSS_TYPES[i]}" == "BINARY" ]]; then
+      # pg bytea hex-input format (\x...); mysql -B escapes the backslash
+      # and COPY's text parser unescapes it on the way in.
+      f="IFNULL(CONCAT('\\\\x', HEX(\`${CROSS_NAMES[i]}\`)), '$DBCOPY_NULL_SENTINEL')"
+    else
+      f="IFNULL(CAST(\`${CROSS_NAMES[i]}\` AS CHAR), '$DBCOPY_NULL_SENTINEL')"
+    fi
+    out+="${out:+, }$f"
   done
   printf '%s' "$out"
 }
@@ -266,7 +279,11 @@ _cross_mysql_select_list() {
 _cross_mysql_csv_expr() {
   local i f out=""
   for i in "${!CROSS_NAMES[@]}"; do
-    f="IF(\`${CROSS_NAMES[i]}\` IS NULL, '$DBCOPY_NULL_SENTINEL', CONCAT('\"', REPLACE(CAST(\`${CROSS_NAMES[i]}\` AS CHAR), '\"', '\"\"'), '\"'))"
+    if [[ "${CROSS_TYPES[i]}" == "BINARY" ]]; then
+      f="IF(\`${CROSS_NAMES[i]}\` IS NULL, '$DBCOPY_NULL_SENTINEL', CONCAT('\"', HEX(\`${CROSS_NAMES[i]}\`), '\"'))"
+    else
+      f="IF(\`${CROSS_NAMES[i]}\` IS NULL, '$DBCOPY_NULL_SENTINEL', CONCAT('\"', REPLACE(CAST(\`${CROSS_NAMES[i]}\` AS CHAR), '\"', '\"\"'), '\"'))"
+    fi
     out+="${out:+, }$f"
   done
   printf 'CONCAT_WS(%s, %s)' "','" "$out"
@@ -275,9 +292,19 @@ _cross_mysql_csv_expr() {
 # SELECT list for a SQLite source: NULLs replaced by the sentinel because
 # sqlite3 -csv prints NULL and '' identically.
 _cross_sqlite_select_list() {
-  local i out=""
+  local i out="" f
   for i in "${!CROSS_NAMES[@]}"; do
-    out+="${out:+, }IFNULL(\"${CROSS_NAMES[i]}\", '$DBCOPY_NULL_SENTINEL')"
+    if [[ "${CROSS_TYPES[i]}" == "BINARY" ]]; then
+      # hex(NULL) is '' in sqlite, so NULL needs an explicit CASE.
+      if [[ "$TGT_ENGINE" == "postgresql" ]]; then
+        f="CASE WHEN \"${CROSS_NAMES[i]}\" IS NULL THEN '$DBCOPY_NULL_SENTINEL' ELSE '\\x' || hex(\"${CROSS_NAMES[i]}\") END"
+      else
+        f="CASE WHEN \"${CROSS_NAMES[i]}\" IS NULL THEN '$DBCOPY_NULL_SENTINEL' ELSE hex(\"${CROSS_NAMES[i]}\") END"
+      fi
+    else
+      f="IFNULL(\"${CROSS_NAMES[i]}\", '$DBCOPY_NULL_SENTINEL')"
+    fi
+    out+="${out:+, }$f"
   done
   printf '%s' "$out"
 }
@@ -285,9 +312,15 @@ _cross_sqlite_select_list() {
 # sqlite3 .import cannot represent NULL — sentinels are imported literally
 # and converted afterwards.
 _cross_sqlite_fix_sentinels() { # $1=table
-  local c sql=""
+  local c sql="" i
   for c in "${CROSS_NAMES[@]}"; do
     sql+="UPDATE \"$1\" SET \"$c\"=NULL WHERE \"$c\"='$DBCOPY_NULL_SENTINEL';"
+  done
+  # Binary columns arrive as hex text — decode them in place.
+  for i in "${!CROSS_NAMES[@]}"; do
+    if [[ "${CROSS_TYPES[i]}" == "BINARY" ]]; then
+      sql+="UPDATE \"$1\" SET \"${CROSS_NAMES[i]}\"=unhex(\"${CROSS_NAMES[i]}\") WHERE \"${CROSS_NAMES[i]}\" IS NOT NULL;"
+    fi
   done
   sqlite3 -bail "$TGT_DB" "$sql"
 }
@@ -320,7 +353,15 @@ _cross_copy_data() { # $1=table
       if ! _cross_psql_src -d "$SRC_DB" -c "COPY (SELECT $sel FROM $(_cross_src_ref "$table")$where_sql) TO STDOUT" > "$tmp"; then
         rm -f "$tmp"; return 1
       fi
-      if ! _cross_mysql_tgt --local-infile=1 -e "LOAD DATA LOCAL INFILE '$tmp' INTO TABLE $(_cross_tgt_ref "$table");"; then
+      for i in "${!CROSS_NAMES[@]}"; do
+        vars+="${vars:+, }@v$i"
+        if [[ "${CROSS_TYPES[i]}" == "BINARY" ]]; then
+          sets+="${sets:+, }\`${CROSS_NAMES[i]}\`=UNHEX(@v$i)"
+        else
+          sets+="${sets:+, }\`${CROSS_NAMES[i]}\`=@v$i"
+        fi
+      done
+      if ! _cross_mysql_tgt --local-infile=1 -e "LOAD DATA LOCAL INFILE '$tmp' INTO TABLE $(_cross_tgt_ref "$table") ($vars) SET $sets;"; then
         echo "ℹ️  LOAD DATA LOCAL requires local_infile=ON on the target MySQL server." >&2
         rm -f "$tmp"; return 1
       fi
@@ -341,7 +382,11 @@ _cross_copy_data() { # $1=table
       sel=$(_cross_sqlite_select_list)
       for i in "${!CROSS_NAMES[@]}"; do
         vars+="${vars:+, }@v$i"
-        sets+="${sets:+, }\`${CROSS_NAMES[i]}\`=NULLIF(@v$i, '$DBCOPY_NULL_SENTINEL')"
+        if [[ "${CROSS_TYPES[i]}" == "BINARY" ]]; then
+          sets+="${sets:+, }\`${CROSS_NAMES[i]}\`=UNHEX(NULLIF(@v$i, '$DBCOPY_NULL_SENTINEL'))"
+        else
+          sets+="${sets:+, }\`${CROSS_NAMES[i]}\`=NULLIF(@v$i, '$DBCOPY_NULL_SENTINEL')"
+        fi
       done
       tmp=$(mktemp) || return 1
       if ! sqlite3 -readonly -csv "$SRC_DB" "SELECT $sel FROM $(_cross_src_ref "$table")$where_sql;" > "$tmp"; then
