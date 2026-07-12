@@ -120,7 +120,7 @@ What carries over: columns (via a generic type map), `NOT NULL`, and the primary
 
 ## 🧪 Tests
 
-Integration tests spin up source/target MySQL 8, MariaDB 11, and PostgreSQL 16 servers with docker compose and run dbcopy against them — plus a file-based SQLite pass (dry-run, cross-server copy, replace-without-duplicates, non-`public` target schema, legacy config):
+Integration tests spin up source/target MySQL 8, MariaDB 11, PostgreSQL 16, and Oracle Free 23ai servers with docker compose and run dbcopy against them — plus a file-based SQLite pass (dry-run, cross-server copy, cross-engine directions, partial-copy options, replace-without-duplicates, non-`public` target schema, legacy config):
 
 ```bash
 tests/run_tests.sh   # requires docker compose
@@ -130,7 +130,7 @@ tests/run_tests.sh   # requires docker compose
 
 ## ⚠️ Notes & limitations
 
-- **Oracle** copies are same-server only (Data Pump via `DATA_PUMP_DIR`); use `NETWORK_LINK` for cross-server transfers. The Oracle path is not covered by the docker tests.
+- **Oracle** copies are same-server only (Data Pump via `DATA_PUMP_DIR`); use `NETWORK_LINK` for cross-server transfers. Data Pump credentials are passed via a mode-600 parameter file that is deleted right after the run.
 - MySQL copies go through `mysqldump | mysql`, so indexes, foreign keys, and triggers carry over. Replacing a table that other tables reference re-attaches their FKs to the new copy.
 - PostgreSQL copies assume the source table lives in the `public` schema; a non-`public` target schema is handled by restoring into `public` and then `ALTER TABLE ... SET SCHEMA`. Replacing a table referenced by another table's FK will fail loudly (drop the constraint first).
 - SQLite table selection uses `sqlite3 .dump`, whose argument is a `LIKE` pattern — a `_` in a table name acts as a single-character wildcard, so a rare similarly-named table could be included.

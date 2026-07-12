@@ -1,5 +1,14 @@
 #!/bin/bash
 
+_oracle_table_exists() { # $1=owner $2=table -> 0/1
+  sqlplus -s /nolog <<EOF | tr -d '[:space:]'
+CONNECT $SRC_USER/"$SRC_PASS"@//$SRC_HOST:${SRC_PORT:-1521}/$SRC_ORA_SERVICE
+SET HEADING OFF FEEDBACK OFF PAGESIZE 0
+SELECT COUNT(*) FROM all_tables WHERE owner = UPPER('$1') AND table_name = UPPER('$2');
+EXIT
+EOF
+}
+
 _oracle_row_count() {
   local owner="$1" table="$2"
   sqlplus -s /nolog <<EOF | tr -d '[:space:]'
@@ -382,19 +391,55 @@ copy_tables() {
     fi
 
     echo "📦 Oracle (Data Pump):"
-    local ora_conn="$SRC_USER@//$SRC_HOST:${SRC_PORT:-1521}/$SRC_ORA_SERVICE"
+    # Credentials go into mode-600 parameter files (removed right after):
+    # expdp/impdp cannot take the password on stdin, and putting it on the
+    # command line would expose it in the process list.
+    local ora_userid="$SRC_USER/\"$SRC_PASS\"@//$SRC_HOST:${SRC_PORT:-1521}/$SRC_ORA_SERVICE"
+    local exp_par imp_par
 
+    local table_exists_action
     for table in "${tables[@]}"; do
       echo "➡️  Oracle: $table"
+      if ! exists=$(_oracle_table_exists "$TGT_DB" "$table"); then
+        echo "❌ Could not check whether $table exists on the target." >&2
+        return 1
+      fi
+      table_exists_action="skip"
+      if [[ "$exists" != "0" ]]; then
+        if ! confirm "Table $table exists on the target. Replace?"; then
+          echo "⏭️  Skipping $table."
+          continue
+        fi
+        table_exists_action="replace"
+      fi
+
       if [[ "$dry_run" == true ]]; then
         echo "Would export/import $table via Data Pump"
         continue
       fi
-      # Password is fed on stdin so it never appears in the process list.
-      if expdp "$ora_conn" tables="$table" dumpfile="${DUMP_FILE}_${table}.dmp" \
-           directory=DATA_PUMP_DIR logfile="exp_${table}.log" reuse_dumpfiles=y <<< "$SRC_PASS" &&
-         impdp "$ora_conn" tables="$table" dumpfile="${DUMP_FILE}_${table}.dmp" \
-           directory=DATA_PUMP_DIR logfile="imp_${table}.log" remap_schema="$SRC_DB:$TGT_DB" <<< "$SRC_PASS"; then
+      exp_par=$(mktemp) || return 1
+      imp_par=$(mktemp) || return 1
+      chmod 600 "$exp_par" "$imp_par"
+      # tables= is schema-qualified: unqualified names would resolve against
+      # the *connected* user's schema, not $SRC_DB.
+      cat > "$exp_par" <<EOF
+userid=$ora_userid
+tables=$SRC_DB.$table
+dumpfile=${DUMP_FILE}_${table}.dmp
+directory=DATA_PUMP_DIR
+logfile=exp_${table}.log
+reuse_dumpfiles=y
+EOF
+      cat > "$imp_par" <<EOF
+userid=$ora_userid
+tables=$SRC_DB.$table
+dumpfile=${DUMP_FILE}_${table}.dmp
+directory=DATA_PUMP_DIR
+logfile=imp_${table}.log
+remap_schema=$SRC_DB:$TGT_DB
+table_exists_action=$table_exists_action
+EOF
+      if expdp parfile="$exp_par" && impdp parfile="$imp_par"; then
         src_count=$(_oracle_row_count "$SRC_DB" "$table")
         tgt_count=$(_oracle_row_count "$TGT_DB" "$table")
         report_copy_result "$table" "$src_count" "$tgt_count" "$log_file" || failures=$((failures + 1))
@@ -403,6 +448,7 @@ copy_tables() {
         echo "$(date '+%F %T') | FAILED $table" >> "$log_file"
         failures=$((failures + 1))
       fi
+      rm -f "$exp_par" "$imp_par"
     done
   fi
 

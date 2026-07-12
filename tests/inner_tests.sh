@@ -325,6 +325,74 @@ assert_eq "--all-tables copies every table" "3" \
 assert_eq "--all-tables data present" "5" "$(sqlite3 -readonly all.db 'SELECT COUNT(*) FROM users;')"
 
 echo
+echo "═══ Oracle: same-server Data Pump copy ═══"
+ora_q() { # run one query as SYSTEM against FREEPDB1, print trimmed result
+  sqlplus -s /nolog <<EOF | tr -d '[:space:]'
+CONNECT system/"orapass"@//oracle:1521/FREEPDB1
+SET HEADING OFF FEEDBACK OFF PAGESIZE 0
+$1
+EXIT
+EOF
+}
+
+echo "--- seeding source/target schemas ---"
+sqlplus -s /nolog > /tmp/ora_seed.log 2>&1 <<'EOF'
+CONNECT system/"orapass"@//oracle:1521/FREEPDB1
+WHENEVER SQLERROR EXIT SQL.SQLCODE
+CREATE USER appsrc IDENTIFIED BY apppass QUOTA UNLIMITED ON USERS;
+GRANT CREATE SESSION, CREATE TABLE TO appsrc;
+CREATE USER apptgt IDENTIFIED BY apppass QUOTA UNLIMITED ON USERS;
+GRANT CREATE SESSION, CREATE TABLE TO apptgt;
+CREATE TABLE appsrc.users (
+  id NUMBER PRIMARY KEY,
+  name VARCHAR2(50) NOT NULL,
+  email VARCHAR2(100) NOT NULL
+);
+INSERT INTO appsrc.users VALUES (1, 'Alice', 'alice@example.com');
+INSERT INTO appsrc.users VALUES (2, 'Bob', 'bob@example.com');
+INSERT INTO appsrc.users VALUES (3, 'Carol', 'carol@example.com');
+INSERT INTO appsrc.users VALUES (4, 'Dave', 'dave@example.com');
+INSERT INTO appsrc.users VALUES (5, 'Eve', 'eve@example.com');
+COMMIT;
+EXIT
+EOF
+if grep -qE "ORA-|SP2-" /tmp/ora_seed.log; then
+  echo "❌ Oracle seeding failed:"; cat /tmp/ora_seed.log; exit 1
+fi
+assert_eq "oracle seed in place" "5" "$(ora_q 'SELECT COUNT(*) FROM appsrc.users;')"
+
+cat > ora.yaml <<'EOF'
+db_engine: "oracle"
+src_host: "oracle"
+src_port: "1521"
+src_user: "system"
+src_pass: "orapass"
+src_db: "APPSRC"
+tgt_host: "oracle"
+tgt_port: "1521"
+tgt_user: "system"
+tgt_pass: "orapass"
+tgt_db: "APPTGT"
+tgt_schema: "public"
+src_ora_service: "FREEPDB1"
+tgt_ora_service: "FREEPDB1"
+dump_file: "testdump"
+EOF
+chmod 600 ora.yaml
+
+echo "--- dry run ---"
+"$ROOT/main.sh" --config ora.yaml --tables users --yes --dry-run
+assert_eq "dry-run copies nothing" "0" "$(ora_q 'SELECT COUNT(*) FROM all_tables WHERE owner=UPPER('"'"'apptgt'"'"');')"
+
+echo "--- real copy (expdp/impdp with schema remap) ---"
+"$ROOT/main.sh" --config ora.yaml --tables users --yes
+assert_eq "users copied to APPTGT (5 rows)" "5" "$(ora_q 'SELECT COUNT(*) FROM apptgt.users;')"
+
+echo "--- --all-tables uses the Oracle catalog ---"
+"$ROOT/main.sh" --config ora.yaml --all-tables --yes
+assert_eq "all-tables run keeps counts intact" "5" "$(ora_q 'SELECT COUNT(*) FROM apptgt.users;')"
+
+echo
 echo "═══ Legacy config format (single-server copy) ═══"
 cat > legacy.yaml <<'EOF'
 db_engine: "mysql"

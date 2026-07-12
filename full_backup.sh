@@ -45,12 +45,25 @@ perform_full_backup() {
       ;;
     oracle)
       file="${SRC_DB}_full.dmp"
-      # Password is fed on stdin so it never appears in the process list.
-      if expdp "$SRC_USER@//$SRC_HOST:${SRC_PORT:-1521}/$SRC_ORA_SERVICE" full=y \
-           directory=DATA_PUMP_DIR dumpfile="$file" logfile=exp_full.log \
-           reuse_dumpfiles=y <<< "$SRC_PASS"; then
+      # Credentials go into a mode-600 parameter file (removed right after):
+      # expdp cannot take the password on stdin, and the command line would
+      # expose it in the process list.
+      local exp_par
+      exp_par=$(mktemp) || return 1
+      chmod 600 "$exp_par"
+      cat > "$exp_par" <<EOF
+userid=$SRC_USER/"$SRC_PASS"@//$SRC_HOST:${SRC_PORT:-1521}/$SRC_ORA_SERVICE
+full=y
+directory=DATA_PUMP_DIR
+dumpfile=$file
+logfile=exp_full.log
+reuse_dumpfiles=y
+EOF
+      if expdp parfile="$exp_par"; then
+        rm -f "$exp_par"
         echo "✅ Oracle Data Pump export complete: $file (logical, stored in DATA_PUMP_DIR on the server)"
       else
+        rm -f "$exp_par"
         echo "❌ Oracle backup failed." >&2
         return 1
       fi

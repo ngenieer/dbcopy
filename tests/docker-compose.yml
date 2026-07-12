@@ -74,7 +74,18 @@ services:
       timeout: 5s
       retries: 60
 
-  # Runs the dbcopy scripts against the four servers above. Based on the
+  oracle:
+    image: gvenzl/oracle-free:23-slim
+    environment:
+      ORACLE_PASSWORD: orapass
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 5s
+      timeout: 10s
+      retries: 60
+      start_period: 30s
+
+  # Runs the dbcopy scripts against the servers above. Based on the
   # postgres image so the pg client exactly matches the server version.
   runner:
     build: ./runner
@@ -88,4 +99,5 @@ services:
       mariadb-tgt: { condition: service_healthy }
       pg-src: { condition: service_healthy }
       pg-tgt: { condition: service_healthy }
+      oracle: { condition: service_healthy }
     command: ["bash", "tests/inner_tests.sh"]
