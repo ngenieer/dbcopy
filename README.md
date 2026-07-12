@@ -1,6 +1,7 @@
 # dbcopy
 
 [![CI](https://github.com/ngenieer/dbcopy/actions/workflows/ci.yml/badge.svg)](https://github.com/ngenieer/dbcopy/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/ngenieer/dbcopy)](https://github.com/ngenieer/dbcopy/releases/latest)
 
 A modular Bash utility that copies tables between **MySQL**, **MariaDB**, **PostgreSQL**, **Oracle**, and **SQLite** — on one server, across servers, or even **across engines**. Works interactively or fully non-interactively (cron/CI), filters rows with `--where`, copies tables in parallel, and verifies every copy by row count (optionally by content checksum).
 
