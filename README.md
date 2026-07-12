@@ -43,6 +43,18 @@ Only the clients for the engines you actually use are needed. No other dependenc
 
 ---
 
+## 📥 Installation
+
+```bash
+git clone https://github.com/ngenieer/dbcopy.git
+cd dbcopy
+./main.sh --help
+```
+
+That's it — dbcopy is plain Bash. Install the client tools for the engines you use (see Requirements above), or add the repo directory to your `PATH`.
+
+---
+
 ## 📖 Usage
 
 ```bash
@@ -164,3 +176,9 @@ The same suite runs in GitHub Actions on every push and pull request, alongside 
 - Cross-engine NULLs travel as a sentinel string (`__dbcopy_null_7f3a9c__`); a field containing that exact text would arrive as NULL.
 - Cross-engine copies read the source table from the `public` schema when the source is PostgreSQL.
 - For stronger credential protection use `~/.my.cnf`, `~/.pgpass`, or an Oracle wallet; TLS settings are also left to your client config.
+
+---
+
+## 📄 License
+
+[MIT](LICENSE)
