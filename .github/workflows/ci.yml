@@ -20,7 +20,10 @@ jobs:
       # -x follows the `# shellcheck source=` directives in main.sh,
       # -a reports findings in the sourced files too.
       - name: ShellCheck
-        run: shellcheck -S warning -ax main.sh tests/run_tests.sh tests/inner_tests.sh
+        run: shellcheck -S warning -ax main.sh tests/run_tests.sh tests/inner_tests.sh tests/unit_tests.sh
+
+      - name: Unit tests (no docker)
+        run: tests/unit_tests.sh
 
   integration:
     runs-on: ubuntu-latest

@@ -9,6 +9,7 @@ dbcopy/
 ├── cross_engine.sh          # Cross-engine copy (mysql <-> postgresql <-> sqlite)
 ├── tests/
 │   ├── run_tests.sh         # Entry point: docker compose up + run tests
+│   ├── unit_tests.sh        # Fast unit tests (no docker/DB needed)
 │   ├── inner_tests.sh       # Assertions, runs inside the runner container
 │   ├── docker-compose.yml   # mysql-src/tgt, pg-src/tgt, runner
 │   ├── runner/Dockerfile    # postgres:16 + mariadb client

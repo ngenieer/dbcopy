@@ -3,7 +3,7 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [1.1.0] - 2026-07-12
 
 ### Added
 - **`--incremental --key COL`**: stateless append-only sync — copies only
@@ -12,6 +12,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Cross-engine copies now support **binary columns** (`blob`/`bytea`/
   `varbinary`): data is transported hex-encoded and decoded on arrival,
   NUL bytes and empty blobs included.
+- Fast unit-test layer (`tests/unit_tests.sh`, 56 assertions, no docker)
+  covering validators, type maps, and CLI flag rules, run in CI.
 
 ### Changed
 - CI caches the test-runner image (Oracle Instant Client download) —
@@ -56,4 +58,5 @@ First stable release.
 - Failures are logged as failures (no more unconditional "Copied" log lines)
   and propagate to the exit code.
 
+[1.1.0]: https://github.com/ngenieer/dbcopy/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/ngenieer/dbcopy/releases/tag/v1.0.0

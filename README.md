@@ -163,10 +163,11 @@ What carries over: columns (via a generic type map), `NOT NULL`, and the primary
 The integration suite spins up source/target MySQL 8, MariaDB 11, PostgreSQL 16, and Oracle Free 23ai servers with docker compose and runs dbcopy against them — plus a file-based SQLite pass. 82 assertions cover dry-run safety, cross-server and all six cross-engine directions (including tabs/newlines/quotes/Korean text/NULL-vs-empty-string edge data), partial-copy options, parallel copy, checksum verification, backup compression/retention, replace-without-duplicates, non-`public` target schemas, and the legacy config format:
 
 ```bash
-tests/run_tests.sh   # requires docker compose
+tests/unit_tests.sh  # fast unit tests (validators, type maps, flag rules) — no docker needed
+tests/run_tests.sh   # full integration suite — requires docker compose
 ```
 
-The same suite runs in GitHub Actions on every push and pull request, alongside a shellcheck lint pass.
+Both run in GitHub Actions on every push and pull request, alongside a shellcheck lint pass.
 
 ---
 
